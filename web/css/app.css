@@ -1,0 +1,57 @@
+/* Dapurku — gaya bersama. Token warna mengikuti desain "Dapurku QR Order v2". */
+:root {
+  --bg: #F4F4F1; --ink: #111311; --muted: #63665F; --line: #E4E3DD; --card: #FFFFFF;
+  --lime: #C8F169; --dark-2: #2A2D2A; --dark-3: #3A3D3A; --photo: #E9E7E0;
+  --chili: #B8361C; --amber: #F2B33D; --amber-deep: #E09A1A; --amber-soft: #FBEBC9;
+  --red-soft: #FBE3DD; --red-ink: #8E2A15; --green-soft: #E4F5C2; --green-ink: #2F4A08;
+  --display: 'Bricolage Grotesque', 'Inter', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-decoration: none; }
+button, input, textarea, select { font-family: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.dark :focus-visible { outline-color: var(--lime); }
+.display { font-family: var(--display); }
+.muted { color: var(--muted); }
+.row { display: flex; align-items: center; }
+.between { justify-content: space-between; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* layar mobile pelanggan */
+.phone { max-width: 430px; margin: 0 auto; min-height: 100dvh; position: relative; }
+
+/* tombol & pil */
+.btn { height: 52px; padding: 0 20px; border-radius: 999px; border: none; background: var(--ink); color: #fff; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.btn.ghost { background: #fff; border: 1px solid var(--line); color: var(--ink); font-weight: 600; }
+.btn.danger { background: #fff; border: 1px solid #F1C4B9; color: var(--red-ink); font-weight: 600; }
+.btn.lime { background: var(--lime); color: var(--ink); }
+.icon-btn { width: 44px; height: 44px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.chip { height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 14px; font-weight: 600; flex-shrink: 0; }
+.chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.chip.sm { height: 36px; padding: 0 14px; font-size: 13px; }
+.tag { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.field { height: 48px; border-radius: 14px; border: 1px solid var(--line); background: #fff; padding: 0 14px; font-size: 15px; width: 100%; }
+textarea.field { height: auto; padding: 12px 14px; resize: none; }
+label.lbl { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+
+/* toast notifikasi */
+.toast-wrap { position: fixed; top: 12px; left: 0; right: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; padding: 0 12px; }
+.toast { pointer-events: auto; width: min(398px, 100%); background: var(--ink); color: #fff; border-radius: 22px; padding: 14px 16px; display: flex; gap: 12px; align-items: flex-start; box-shadow: 0 12px 30px rgba(17,19,17,.28); animation: toast-in .28s ease; border: 1px solid #2A2D2A; text-decoration: none; }
+.toast .ic { width: 36px; height: 36px; border-radius: 999px; background: var(--lime); color: var(--ink); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.toast b { display: block; font-size: 15px; margin-bottom: 2px; }
+.toast span.t { font-size: 13px; line-height: 1.4; color: #C9CCC9; }
+.toast.out { opacity: 0; transform: translateY(-8px); transition: all .25s; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
+
+/* bottom sheet */
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(17,19,17,.45); z-index: 100; display: flex; align-items: flex-end; justify-content: center; }
+.sheet { background: var(--bg); border-radius: 32px 32px 0 0; width: min(430px, 100%); max-height: 90dvh; overflow: auto; padding: 22px 20px 24px; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(17,19,17,.5); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal { background: #fff; border-radius: 28px; width: min(520px, 100%); max-height: 92dvh; overflow: auto; padding: 24px; }
+
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } * { scroll-behavior: auto !important; } }

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status pesanan</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+  .hero { margin: 16px 16px 0; padding: 22px; border-radius: 32px; background: var(--ink); color: #fff; display: flex; flex-direction: column; gap: 18px; }
+  .chipx { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 6px; border-radius: 999px; background: var(--dark-2); font-size: 12px; font-weight: 600; }
+  .chipx i { width: 22px; height: 22px; border-radius: 999px; background: var(--lime); color: var(--ink); display: flex; align-items: center; justify-content: center; }
+  .segs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .seg1 { height: 6px; border-radius: 999px; background: var(--dark-3); overflow: hidden; }
+  .seg1 > div { height: 6px; background: var(--lime); }
+  .tl { padding: 22px 20px 0; display: flex; flex-direction: column; gap: 16px; }
+  .tl .it { display: flex; gap: 14px; align-items: center; }
+  .tl .ic { width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .ic.done { background: var(--ink); color: var(--lime); }
+  .ic.now { background: var(--amber-soft); color: #8A5A00; }
+  .ic.todo { border: 2px dashed #C9C7BF; }
+  .ic.bad { background: var(--red-soft); color: var(--red-ink); }
+  .receipt { margin: 22px 16px 0; padding: 16px 18px; border-radius: 24px; background: #fff; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+  .hist { margin: 14px 16px 0; padding: 4px 18px; border-radius: 24px; background: #fff; border: 1px solid var(--line); }
+  .hist summary { min-height: 48px; display: flex; align-items: center; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .hist .n { padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .hist .n b { display: block; font-size: 14px; }
+  .acts { margin-top: auto; padding: 16px 16px 20px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .acts .btn { height: 52px; font-size: 14px; }
+  .perm { margin: 12px 16px 0; padding: 12px 16px; border-radius: 18px; background: var(--amber-soft); color: #5B3C00; font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .perm button { height: 36px; padding: 0 14px; border-radius: 999px; border: none; background: var(--ink); color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="phone" style="display:flex;flex-direction:column">
+  <div class="hero" id="hero">
+    <div class="row between">
+      <span class="chipx" id="payChip"><i>✓</i><span>Memuat…</span></span>
+      <span id="ref" style="font-size:12px;color:#9DA19A"></span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span id="lead" style="font-size:14px;color:#9DA19A">&nbsp;</span>
+      <span id="big" class="display" style="font-size:64px;font-weight:800;letter-spacing:-2.5px;line-height:1;color:var(--lime)">…</span>
+    </div>
+    <div class="segs" id="segs" aria-hidden="true"></div>
+  </div>
+
+  <div class="perm" id="perm" hidden>
+    <span>Aktifkan notifikasi supaya tahu begitu pesananmu siap.</span>
+    <button type="button" id="permBtn">Aktifkan</button>
+  </div>
+
+  <div class="tl" id="tl" aria-label="Tahap pesanan"></div>
+  <div class="receipt" id="receipt"></div>
+  <details class="hist" id="hist"><summary id="histTitle">Riwayat notifikasi</summary><div id="histList"></div></details>
+
+  <div class="acts">
+    <button type="button" class="btn ghost" id="call">Panggil pelayan</button>
+    <a class="btn" id="more" href="/">Tambah pesanan</a>
+  </div>
+</div>
+<script src="/js/common.js"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var token = DK.q('o') || (DK.activeOrder() || {}).token;
+  if (!token) { location.replace('/'); return; }
+  var order = null;
+  var CHECK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>';
+  var POT = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 7c0-1 1-1.5 1-2.5M12 7c0-1 1-1.5 1-2.5M16 7c0-1 1-1.5 1-2.5"></path><path d="M3 11h18a9 9 0 0 1-18 0z"></path></svg>';
+
+  $('more').href = '/' + (DK.getMeja() ? '?meja=' + encodeURIComponent(DK.getMeja()) : '');
+
+  function tahap(o) {
+    var s = o.status, paid = !!o.paid_at;
+    var cooking = s === 'dimasak', ready = s === 'siap' || s === 'selesai';
+    function st(done, now) { return done ? 'done' : (now ? 'now' : 'todo'); }
+    return [
+      { t: 'Pembayaran diterima', at: o.paid_at, c: st(paid, false) },
+      { t: 'Masuk ke dapur', at: o.paid_at, c: st(paid && s !== 'baru' ? true : paid, s === 'baru' && false) },
+      { t: 'Sedang dimasak', at: o.cooking_at, c: st(cooking ? false : (o.cooking_at ? true : false), cooking) },
+      { t: s === 'siap' ? 'Siap, diantar ke mejamu' : 'Diantar ke meja', at: o.served_at || o.ready_at, c: st(s === 'selesai', s === 'siap') }
+    ];
+  }
+
+  function render(o) {
+    order = o;
+    var s = o.status;
+    document.title = 'Pesanan #' + o.kode;
+    $('ref').textContent = 'Meja ' + o.meja + ' · #' + o.kode;
+
+    // chip pembayaran
+    var pc = $('payChip');
+    if (s === 'menunggu_bayar') pc.innerHTML = '<i style="background:var(--amber);">!</i><span>Belum dibayar · ' + (o.metode === 'tunai' ? 'Tunai' : 'QRIS') + '</span>';
+    else if (s === 'batal' || s === 'kedaluwarsa') pc.innerHTML = '<i style="background:#FF6B57;">×</i><span>' + (s === 'batal' ? 'Dibatalkan' : 'Kedaluwarsa') + '</span>';
+    else pc.innerHTML = '<i>' + CHECK.replace('width="16" height="16"', 'width="12" height="12"') + '</i><span>Lunas · ' + (o.metode === 'tunai' ? 'Tunai' : 'QRIS') + '</span>';
+
+    // teks besar
+    var lead = '', big = '', color = 'var(--lime)';
+    if (s === 'menunggu_bayar') {
+      if (o.metode === 'qris') { location.replace('/bayar.html?o=' + encodeURIComponent(token)); return; }
+      lead = 'Bayar tunai ke kasir sebesar'; big = DK.rp(o.total); color = 'var(--amber)';
+      $('big').style.fontSize = '44px';
+    } else if (s === 'baru') { lead = 'Pesanan antre di dapur, siap dalam'; big = '± ' + o.estimasi_menit + ' mnt'; }
+    else if (s === 'dimasak') { lead = 'Sedang dimasak, siap dalam'; big = '± ' + o.estimasi_menit + ' mnt'; }
+    else if (s === 'siap') { lead = 'Pesananmu sudah selesai'; big = 'Siap!'; }
+    else if (s === 'selesai') { lead = 'Selamat menikmati'; big = 'Selesai'; }
+    else { lead = s === 'batal' ? 'Pesanan ini dibatalkan' : 'Pesanan tidak dibayar tepat waktu'; big = s === 'batal' ? 'Batal' : 'Hangus'; color = '#FF6B57'; }
+    $('lead').textContent = lead; $('big').textContent = big; $('big').style.color = color;
+    $('big').style.fontSize = s === 'menunggu_bayar' ? '44px' : '64px';
+
+    // segmen progres
+    var seg = [0, 0, 0, 0];
+    if (o.paid_at) { seg[0] = 100; seg[1] = 100; }
+    if (s === 'dimasak') {
+      var est = Math.max(1, (o.estimasi_menit || 1)) , el = (Date.now() / 1000 - o.cooking_at) / 60;
+      seg[2] = Math.max(8, Math.min(92, (el / Math.max(1, el + est)) * 100));
+    }
+    if (s === 'siap' || s === 'selesai') { seg[2] = 100; seg[3] = 100; }
+    $('segs').innerHTML = seg.map(function (p) { return '<div class="seg1"><div style="width:' + p + '%"></div></div>'; }).join('');
+
+    // timeline
+    if (s === 'batal' || s === 'kedaluwarsa') {
+      $('tl').innerHTML = '<div class="it"><span class="ic bad">×</span><span style="flex:1;font-size:15px;font-weight:700">' + (s === 'batal' ? 'Pesanan dibatalkan' : 'Waktu bayar habis') + '</span></div>';
+    } else {
+      $('tl').innerHTML = tahap(o).map(function (x) {
+        var icon = x.c === 'done' ? CHECK : (x.c === 'now' ? POT : '');
+        var meta = x.c === 'now' ? '<span style="font-size:13px;font-weight:600;color:#8A5A00">sekarang</span>' : (x.at && x.c === 'done' ? '<span class="muted" style="font-size:13px">' + DK.jam(x.at) + '</span>' : '');
+        return '<div class="it"><span class="ic ' + x.c + '">' + icon + '</span><span style="flex:1;font-size:15px;font-weight:' + (x.c === 'todo' ? 600 : (x.c === 'now' ? 700 : 600)) + ';' + (x.c === 'todo' ? 'color:var(--muted)' : '') + '">' + DK.esc(x.t) + '</span>' + meta + '</div>';
+      }).join('');
+    }
+
+    // rincian
+    var withNote = o.items.filter(function (i) { return i.note; });
+    var notes = withNote.map(function (i) { return withNote.length > 1 ? i.nama + ': ' + i.note : i.note; });
+    $('receipt').innerHTML = o.items.map(function (i) {
+      return '<div class="row between" style="gap:12px"><span>' + i.qty + '× ' + DK.esc(i.nama) + '</span><span style="font-weight:600">' + DK.rp(i.subtotal) + '</span></div>';
+    }).join('') + (notes.length ? '<span class="muted" style="font-size:13px">Catatan: ' + DK.esc(notes.join(' · ')) + '</span>' : '') +
+      '<div style="height:1px;background:var(--line)"></div><div class="row between" style="font-weight:700"><span>' + (o.paid_at ? 'Total dibayar' : 'Total') + '</span><span>' + DK.rp(o.total) + '</span></div>' +
+      (o.kembalian ? '<div class="row between muted" style="font-size:13px"><span>Kembalian</span><span>' + DK.rp(o.kembalian) + '</span></div>' : '');
+
+    // riwayat notifikasi
+    $('histTitle').textContent = 'Riwayat notifikasi (' + o.notifikasi.length + ')';
+    $('histList').innerHTML = o.notifikasi.slice().reverse().map(function (n) {
+      return '<div class="n"><b>' + DK.esc(n.judul) + ' <span class="muted" style="font-weight:500">· ' + DK.jam(n.at) + '</span></b><span class="muted">' + DK.esc(n.isi) + '</span></div>';
+    }).join('');
+
+    var akhir = ['selesai', 'batal', 'kedaluwarsa'].indexOf(s) >= 0;
+    $('call').hidden = akhir;
+    if (akhir) DK.setActiveOrder(null); else DK.setActiveOrder({ token: token, kode: o.kode });
+  }
+
+  function refresh() {
+    return DK.api('/api/orders/' + encodeURIComponent(token)).then(render).catch(function (e) {
+      if (e.status === 404) { DK.setActiveOrder(null); location.replace('/'); }
+    });
+  }
+  refresh();
+  setInterval(refresh, 10000); // menyegarkan estimasi menit + cadangan SSE
+  DK.watchOrder(token, { onNotif: function () { refresh(); } });
+
+  $('call').addEventListener('click', function () {
+    var b = this; b.disabled = true;
+    DK.api('/api/orders/' + encodeURIComponent(token) + '/panggil', { method: 'POST', body: {} })
+      .then(function () { setTimeout(function () { b.disabled = false; }, 15000); })
+      .catch(function (e) { b.disabled = false; DK.toast({ judul: 'Gagal memanggil', isi: e.message }); });
+  });
+
+  if (DK.notifPermission() === 'default') {
+    $('perm').hidden = false;
+    $('permBtn').addEventListener('click', function () {
+      DK.askNotif().then(function () { $('perm').hidden = true; DK.chime(true); });
+    });
+  }
+})();
+</script>
+</body>
+</html>

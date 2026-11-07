@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR semua meja</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+  .bar { padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .sheet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; padding: 0 24px 24px; }
+  .tc { break-inside: avoid; border: 2px solid var(--ink); border-radius: 28px; padding: 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; background: #fff; }
+  .tc img { width: 200px; height: 200px; }
+  @media print { .bar { display: none; } body { background: #fff; } .sheet-grid { padding: 0; grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div class="bar"><h1 class="display" style="margin:0;font-size:24px">QR semua meja</h1><button type="button" class="btn" style="height:44px" onclick="window.print()">Cetak / simpan PDF</button></div>
+<div class="sheet-grid" id="g"><p class="muted">Memuat…</p></div>
+<script src="/js/common.js"></script>
+<script>
+DK.requireLogin().then(function () { return Promise.all([DK.api('/api/admin/meja'), DK.api('/api/config')]); }).then(function (r) {
+  document.getElementById('g').innerHTML = r[0].filter(function (m) { return m.aktif; }).map(function (m) {
+    return '<div class="tc"><span class="display" style="font-size:20px;font-weight:800">' + DK.esc(r[1].nama_resto.toLowerCase()) + '.</span><img alt="QR meja ' + DK.esc(m.no) + '" src="/api/meja/' + encodeURIComponent(m.no) + '/qr.svg"><b class="display" style="font-size:34px;letter-spacing:-1px">Meja ' + DK.esc(m.no) + '</b><span class="muted" style="font-size:14px;text-align:center">Scan untuk lihat menu, pesan, dan bayar dari mejamu</span></div>';
+  }).join('');
+}).catch(function () {});
+</script>
+</body>
+</html>

@@ -1,0 +1,328 @@
+use crate::auth::{cookie, Auth};
+use crate::notify::push;
+use crate::orders::{self, NewOrder};
+use crate::util::*;
+use crate::{sse, App};
+use axum::{
+    body::Bytes,
+    extract::{Path, State},
+    http::{header, HeaderMap},
+    response::{IntoResponse, Response, Sse},
+    Json,
+};
+use hmac::{Hmac, Mac};
+use rusqlite::{params, Connection};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use sha2::Sha256;
+use std::sync::Arc;
+
+type S = Arc<App>;
+
+// ---------- konfigurasi & menu ----------
+
+pub async fn config(State(s): State<S>) -> R<Json<Value>> {
+    let conn = s.db.lock().unwrap();
+    Ok(Json(json!({
+        "nama_resto": setting_s(&conn, "nama_resto", "Dapurku"),
+        "merchant_nmid": setting_s(&conn, "merchant_nmid", "SIMULASI"),
+        "bayar_menit": setting_i(&conn, "bayar_menit", 15),
+        "sim": s.cfg.sim,
+    })))
+}
+
+fn extras_of(conn: &Connection, menu_id: i64) -> rusqlite::Result<Vec<Value>> {
+    let mut stmt = conn.prepare("SELECT id, nama, harga FROM menu_extras WHERE menu_id = ?1 ORDER BY id")?;
+    let rows = stmt.query_map(params![menu_id], |r| {
+        Ok(json!({ "id": r.get::<_, i64>(0)?, "nama": r.get::<_, String>(1)?, "harga": r.get::<_, i64>(2)? }))
+    })?;
+    rows.collect()
+}
+
+pub fn menu_list(conn: &Connection) -> rusqlite::Result<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, nama, kategori, harga, deskripsi, foto_url, pedas, waktu_masak, tersedia
+           FROM menu_items WHERE aktif = 1 ORDER BY urutan, id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?,
+            r.get::<_, String>(4)?, r.get::<_, String>(5)?, r.get::<_, i64>(6)?, r.get::<_, i64>(7)?,
+            r.get::<_, i64>(8)?,
+        ))
+    })?;
+    let list: Vec<_> = rows.collect::<Result<Vec<_>, _>>()?;
+    let mut out = Vec::new();
+    for (id, nama, kat, harga, desk, foto, pedas, wm, ada) in list {
+        out.push(json!({
+            "id": id, "nama": nama, "kategori": kat, "harga": harga, "deskripsi": desk,
+            "foto_url": foto, "pedas": pedas == 1, "waktu_masak": wm, "tersedia": ada == 1,
+            "extras": extras_of(conn, id)?,
+        }));
+    }
+    Ok(out)
+}
+
+pub async fn menu(State(s): State<S>) -> R<Json<Value>> {
+    let conn = s.db.lock().unwrap();
+    let items = menu_list(&conn)?;
+    let d0 = day_start(now(), s.cfg.tz);
+    // Terlaris hari ini; kalau belum ada penjualan, pakai menu pertama yang tersedia.
+    let top: Option<i64> = conn
+        .query_row(
+            "SELECT oi.menu_id FROM order_items oi JOIN orders o ON o.id = oi.order_id
+              WHERE o.paid_at >= ?1 AND o.status NOT IN ('batal','kedaluwarsa')
+              GROUP BY oi.menu_id ORDER BY SUM(oi.qty) DESC LIMIT 1",
+            params![d0],
+            |r| r.get(0),
+        )
+        .ok();
+    let terlaris = items
+        .iter()
+        .find(|m| Some(m["id"].as_i64().unwrap_or(-1)) == top && m["tersedia"] == true)
+        .or_else(|| items.iter().find(|m| m["tersedia"] == true))
+        .cloned();
+    let mut kategori: Vec<String> = Vec::new();
+    for m in &items {
+        let k = m["kategori"].as_str().unwrap_or("").to_string();
+        if !kategori.contains(&k) {
+            kategori.push(k);
+        }
+    }
+    Ok(Json(json!({ "kategori": kategori, "items": items, "terlaris": terlaris })))
+}
+
+pub async fn meja_list(State(s): State<S>) -> R<Json<Value>> {
+    let conn = s.db.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT no FROM meja WHERE aktif = 1 ORDER BY no")?;
+    let nos: Vec<String> = stmt.query_map([], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(Json(json!(nos)))
+}
+
+// ---------- pesanan (pelanggan, diakses lewat token rahasia) ----------
+
+pub fn order_id_by_token(conn: &Connection, token: &str) -> R<i64> {
+    conn.query_row("SELECT id FROM orders WHERE token = ?1", params![token], |r| r.get(0))
+        .map_err(|_| not_found("pesanan tidak ditemukan"))
+}
+
+pub fn order_view(conn: &Connection, id: i64) -> R<Value> {
+    let est = orders::max_waktu_masak(conn, id);
+    let mut v: Value = conn
+        .query_row(
+            "SELECT meja_no, metode, status, total, uang_diterima, kembalian,
+                    created_at, expires_at, paid_at, cooking_at, ready_at, served_at
+               FROM orders WHERE id = ?1",
+            params![id],
+            |r| {
+                let status: String = r.get(2)?;
+                let cooking_at: Option<i64> = r.get(9)?;
+                Ok(json!({
+                    "id": id, "kode": kode(id),
+                    "meja": r.get::<_, String>(0)?, "metode": r.get::<_, String>(1)?,
+                    "status": status, "total": r.get::<_, i64>(3)?,
+                    "uang_diterima": r.get::<_, Option<i64>>(4)?, "kembalian": r.get::<_, Option<i64>>(5)?,
+                    "created_at": r.get::<_, i64>(6)?, "expires_at": r.get::<_, i64>(7)?,
+                    "paid_at": r.get::<_, Option<i64>>(8)?, "cooking_at": cooking_at,
+                    "ready_at": r.get::<_, Option<i64>>(10)?, "served_at": r.get::<_, Option<i64>>(11)?,
+                    "estimasi_menit": orders::estimasi_menit(&status, est, cooking_at),
+                }))
+            },
+        )
+        .map_err(|_| not_found("pesanan tidak ditemukan"))?;
+    v["items"] = json!(orders::items_json(conn, id)?);
+    let mut stmt = conn.prepare(
+        "SELECT id, tipe, judul, isi, created_at FROM notifications
+          WHERE order_id = ?1 AND audience = 'pembeli' ORDER BY id",
+    )?;
+    let rows = stmt.query_map(params![id], |r| {
+        Ok(json!({ "id": r.get::<_, i64>(0)?, "tipe": r.get::<_, String>(1)?, "judul": r.get::<_, String>(2)?,
+                   "isi": r.get::<_, String>(3)?, "at": r.get::<_, i64>(4)? }))
+    })?;
+    v["notifikasi"] = json!(rows.collect::<Result<Vec<_>, _>>()?);
+    Ok(v)
+}
+
+pub async fn create_order(State(s): State<S>, Json(b): Json<NewOrder>) -> R<Json<Value>> {
+    let conn = s.db.lock().unwrap();
+    let (id, token) = orders::create_order(&conn, &b)?;
+    let v = order_view(&conn, id)?;
+    Ok(Json(json!({ "token": token, "order": v })))
+}
+
+pub async fn get_order(State(s): State<S>, Path(token): Path<String>) -> R<Json<Value>> {
+    let conn = s.db.lock().unwrap();
+    let id = order_id_by_token(&conn, &token)?;
+    Ok(Json(order_view(&conn, id)?))
+}
+
+pub async fn order_qr(State(s): State<S>, Path(token): Path<String>) -> R<Response> {
+    let (id, total, nmid) = {
+        let conn = s.db.lock().unwrap();
+        let id = order_id_by_token(&conn, &token)?;
+        let total: i64 = conn.query_row("SELECT total FROM orders WHERE id = ?1", params![id], |r| r.get(0))?;
+        (id, total, setting_s(&conn, "merchant_nmid", "SIMULASI"))
+    };
+    // Payload simulasi. Untuk QRIS sungguhan, ganti dengan QR dinamis dari payment gateway.
+    qr_svg(&format!("DAPURKU-SIM|{}|{}|{}", kode(id), total, nmid))
+}
+
+pub async fn meja_qr(State(s): State<S>, headers: HeaderMap, Path(no): Path<String>) -> R<Response> {
+    {
+        let conn = s.db.lock().unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM meja WHERE no = ?1", params![no], |r| r.get(0))?;
+        if n == 0 {
+            return Err(not_found("meja tidak ditemukan"));
+        }
+    }
+    let base = if !s.cfg.base_url.is_empty() {
+        s.cfg.base_url.clone()
+    } else {
+        let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("localhost:8080");
+        format!("http://{host}")
+    };
+    qr_svg(&format!("{}/?meja={}", base.trim_end_matches('/'), no))
+}
+
+fn qr_svg(data: &str) -> R<Response> {
+    use qrcode::render::svg;
+    let code = qrcode::QrCode::new(data.as_bytes()).map_err(|_| bad("data QR terlalu panjang"))?;
+    let img = code
+        .render::<svg::Color>()
+        .min_dimensions(200, 200)
+        .quiet_zone(false)
+        .dark_color(svg::Color("#111311"))
+        .light_color(svg::Color("#ffffff"))
+        .build();
+    Ok(([(header::CONTENT_TYPE, "image/svg+xml")], img).into_response())
+}
+
+pub async fn simulate_pay(State(s): State<S>, Path(token): Path<String>) -> R<Json<Value>> {
+    if !s.cfg.sim {
+        return Err(forbidden());
+    }
+    let conn = s.db.lock().unwrap();
+    let id = order_id_by_token(&conn, &token)?;
+    let total: i64 = conn.query_row("SELECT total FROM orders WHERE id = ?1", params![id], |r| r.get(0))?;
+    let baru = orders::mark_paid(&conn, id, "qris", total, &format!("SIM-{id}"), None, None, None)?;
+    Ok(Json(json!({ "ok": true, "baru": baru })))
+}
+
+pub async fn customer_cancel(State(s): State<S>, Path(token): Path<String>) -> R<Json<Value>> {
+    let conn = s.db.lock().unwrap();
+    let id = order_id_by_token(&conn, &token)?;
+    orders::cancel(&conn, id, false)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub async fn panggil(State(s): State<S>, Path(token): Path<String>) -> R<Json<Value>> {
+    let conn = s.db.lock().unwrap();
+    let id = order_id_by_token(&conn, &token)?;
+    let (meja, status): (String, String) = conn.query_row(
+        "SELECT meja_no, status FROM orders WHERE id = ?1", params![id], |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    if status == "batal" || status == "kedaluwarsa" {
+        return Err(conflict("pesanan sudah tidak aktif"));
+    }
+    // dedupe per menit supaya tidak bisa di-spam
+    let dk = format!("{id}:panggil:{}", now() / 60);
+    push(&conn, Some(id), "kasir", "panggil_pelayan", &format!("Meja {meja} memanggil pelayan"),
+         &format!("#{}", kode(id)), Some(&dk))?;
+    push(&conn, Some(id), "pembeli", "pelayan_dipanggil", "Pelayan dipanggil",
+         "Pelayan segera menuju mejamu.", Some(&dk))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub async fn order_events(State(s): State<S>, headers: HeaderMap, Path(token): Path<String>) -> R<Sse<impl futures_core::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>>> {
+    let (id, last) = {
+        let conn = s.db.lock().unwrap();
+        let id = order_id_by_token(&conn, &token)?;
+        (id, sse::start_id(&conn, &headers))
+    };
+    Ok(sse::stream(s.clone(), Some(id), vec!["pembeli".to_string()], last))
+}
+
+// ---------- webhook payment gateway (QRIS) ----------
+
+#[derive(Deserialize)]
+struct Hook {
+    kode: String,
+    #[serde(rename = "ref")]
+    ref_: String,
+    amount: i64,
+    status: String,
+}
+
+/// Payment gateway memanggil endpoint ini. Body ditandatangani HMAC-SHA256
+/// dengan WEBHOOK_SECRET dan dikirim di header `X-Signature` (hex).
+pub async fn webhook_qris(State(s): State<S>, headers: HeaderMap, body: Bytes) -> R<Json<Value>> {
+    let sig = headers.get("x-signature").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let want = hex::decode(sig).map_err(|_| unauthorized())?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(s.cfg.webhook_secret.as_bytes()).map_err(|_| bad("secret"))?;
+    mac.update(&body);
+    mac.verify_slice(&want).map_err(|_| unauthorized())?;
+
+    let h: Hook = serde_json::from_slice(&body).map_err(|_| bad("payload tidak valid"))?;
+    if h.status != "PAID" {
+        return Ok(Json(json!({ "ok": true, "diabaikan": true })));
+    }
+    let id: i64 = h.kode.trim_start_matches("DPK-").parse().map_err(|_| bad("kode tidak valid"))?;
+    let conn = s.db.lock().unwrap();
+    let metode: String = conn
+        .query_row("SELECT metode FROM orders WHERE id = ?1", params![id], |r| r.get(0))
+        .map_err(|_| not_found("pesanan tidak ditemukan"))?;
+    if metode != "qris" {
+        return Err(conflict("pesanan ini bukan pesanan QRIS"));
+    }
+    let baru = orders::mark_paid(&conn, id, "qris", h.amount, &format!("QRIS-{}", h.ref_), None, None, None)?;
+    Ok(Json(json!({ "ok": true, "baru": baru })))
+}
+
+// ---------- login staf ----------
+
+#[derive(Deserialize)]
+pub struct Login {
+    role: String,
+    pin: String,
+    nama: Option<String>,
+}
+
+pub async fn login(State(s): State<S>, Json(b): Json<Login>) -> R<Response> {
+    let benar = match b.role.as_str() {
+        "kasir" => &s.cfg.pin_kasir,
+        "dapur" => &s.cfg.pin_dapur,
+        "admin" => &s.cfg.pin_admin,
+        _ => return Err(bad("role tidak dikenal")),
+    };
+    if !ct_eq(&b.pin, benar) {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        return Err(AppError(axum::http::StatusCode::UNAUTHORIZED, "PIN salah".into()));
+    }
+    let nama: String = b.nama.unwrap_or_default().trim().chars().take(40).collect();
+    let nama = if nama.is_empty() { b.role.clone() } else { nama };
+    let token = format!("{}{}", rand_token(24), rand_token(24));
+    let n = now();
+    {
+        let conn = s.db.lock().unwrap();
+        conn.execute("DELETE FROM sessions WHERE expires_at < ?1", params![n])?;
+        conn.execute(
+            "INSERT INTO sessions(token, role, nama, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![token, b.role, nama, n, n + 12 * 3600],
+        )?;
+    }
+    let ck = format!("dk_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200");
+    Ok(([(header::SET_COOKIE, ck)], Json(json!({ "ok": true, "role": b.role, "nama": nama }))).into_response())
+}
+
+pub async fn logout(State(s): State<S>, headers: HeaderMap) -> R<Response> {
+    if let Some(tok) = cookie(&headers, "dk_session") {
+        let conn = s.db.lock().unwrap();
+        conn.execute("DELETE FROM sessions WHERE token = ?1", params![tok])?;
+    }
+    let ck = "dk_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".to_string();
+    Ok(([(header::SET_COOKIE, ck)], Json(json!({ "ok": true }))).into_response())
+}
+
+pub async fn me(auth: Auth) -> Json<Value> {
+    Json(json!({ "role": auth.role, "nama": auth.nama }))
+}

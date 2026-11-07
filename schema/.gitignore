@@ -1,0 +1,3 @@
+server/target/
+data/*.db*
+__pycache__/

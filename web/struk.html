@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Struk</title>
+<style>
+  body { font-family: 'Courier New', monospace; font-size: 13px; width: 300px; margin: 16px auto; color: #000; }
+  h1 { font-size: 18px; text-align: center; margin: 0; } .c { text-align: center; } hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+  .r { display: flex; justify-content: space-between; gap: 8px; } .n { padding-left: 14px; font-size: 12px; }
+  button { margin-top: 12px; width: 100%; padding: 10px; } @media print { button { display: none; } }
+</style>
+</head>
+<body>
+<h1 id="resto">Dapurku</h1>
+<div class="c" id="meta">Memuat…</div><hr><div id="items"></div><hr><div id="tot"></div><hr>
+<div class="c">Terima kasih!</div>
+<button type="button" onclick="window.print()">Cetak</button>
+<script src="/js/common.js"></script>
+<script>
+DK.api('/api/config').then(function (c) { document.getElementById('resto').textContent = c.nama_resto; }).catch(function () {});
+DK.api('/api/staff/orders/' + encodeURIComponent(DK.q('id'))).then(function (o) {
+  var d = new Date((o.paid_at || o.created_at) * 1000);
+  document.getElementById('meta').innerHTML = '#' + DK.esc(o.kode) + '<br>Meja ' + DK.esc(o.meja) + '<br>' + d.toLocaleString('id-ID');
+  document.getElementById('items').innerHTML = o.items.map(function (i) {
+    return '<div class="r"><span>' + i.qty + '× ' + DK.esc(i.nama) + '</span><span>' + DK.rp(i.subtotal) + '</span></div>' + (i.note ? '<div class="n">' + DK.esc(i.note) + '</div>' : '');
+  }).join('');
+  var t = '<div class="r"><b>TOTAL</b><b>' + DK.rp(o.total) + '</b></div><div class="r"><span>Bayar</span><span>' + (o.metode === 'qris' ? 'QRIS' : 'Tunai') + (o.paid_at ? '' : ' (belum lunas)') + '</span></div>';
+  if (o.uang_diterima) t += '<div class="r"><span>Diterima</span><span>' + DK.rp(o.uang_diterima) + '</span></div><div class="r"><span>Kembali</span><span>' + DK.rp(o.kembalian) + '</span></div>';
+  document.getElementById('tot').innerHTML = t;
+  setTimeout(function () { window.print(); }, 400);
+}).catch(function (e) { document.getElementById('meta').textContent = e.status === 401 ? 'Silakan login dulu.' : e.message; });
+</script>
+</body>
+</html>

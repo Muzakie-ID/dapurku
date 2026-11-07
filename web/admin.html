@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard Admin</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+  .shell { min-height: 100dvh; display: flex; flex-wrap: wrap; }
+  nav.side { flex: 1 1 220px; max-width: 260px; background: var(--ink); color: #fff; padding: 24px 16px; display: flex; flex-direction: column; gap: 6px; }
+  @media (max-width: 800px) { nav.side { max-width: none; flex-direction: row; flex-wrap: wrap; padding: 12px; } nav.side .logo { width: 100%; padding-bottom: 6px !important; } }
+  nav.side a, nav.side button { height: 44px; padding: 0 14px; border-radius: 14px; color: #C9CCC9; display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 600; background: none; border: none; text-align: left; }
+  nav.side a.on { background: var(--lime); color: var(--ink); font-weight: 700; }
+  main { flex: 999 1 560px; min-width: 0; padding: 28px 32px 40px; display: flex; flex-direction: column; gap: 20px; }
+  @media (max-width: 600px) { main { padding: 20px 16px 32px; } }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .kpi { padding: 20px; border-radius: 24px; background: #fff; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+  .kpi span { font-size: 13px; color: var(--muted); } .kpi b { font-family: var(--display); font-size: 32px; font-weight: 800; letter-spacing: -1px; }
+  .box { padding: 22px; border-radius: 26px; background: #fff; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .bars { height: 200px; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 8px; align-items: end; }
+  .bars div { border-radius: 8px; min-height: 4px; }
+  .jam { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 8px; font-size: 11px; color: var(--muted); text-align: center; }
+  .tbl { display: grid; gap: 12px; align-items: center; padding: 10px 8px; font-size: 14px; border-bottom: 1px solid #EFEEE9; }
+  .tbl.h { font-size: 12px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); padding-top: 0; }
+  .menu-cols { grid-template-columns: 56px minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 120px 80px; }
+  .sw { width: 52px; height: 30px; border-radius: 999px; border: none; padding: 3px; display: flex; }
+  .sw i { width: 24px; height: 24px; border-radius: 999px; display: block; }
+  .sw[aria-pressed="true"] { background: var(--ink); justify-content: flex-end; } .sw[aria-pressed="true"] i { background: var(--lime); }
+  .sw[aria-pressed="false"] { background: var(--line); justify-content: flex-start; } .sw[aria-pressed="false"] i { background: #fff; }
+  .thumb { width: 44px; height: 44px; border-radius: 12px; background: var(--photo); color: var(--muted); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .qrs { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+  .qrc { border: 1px solid var(--line); border-radius: 22px; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .qrc img { width: 150px; height: 150px; }
+  .frow { display: grid; gap: 10px; }
+  section[hidden] { display: none; }
+  .err { color: var(--red-ink); font-size: 13px; font-weight: 600; min-height: 18px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="side" aria-label="Menu admin">
+    <span class="display logo" style="font-size:26px;font-weight:800;letter-spacing:-.8px;padding:0 12px 20px" id="brand">dapurku.</span>
+    <a href="#dashboard" data-v="dashboard" class="on">Dashboard</a>
+    <a href="#pesanan" data-v="pesanan">Pesanan</a>
+    <a href="#menu" data-v="menu">Menu</a>
+    <a href="#meja" data-v="meja">Meja &amp; QR</a>
+    <a href="#laporan" data-v="laporan">Laporan</a>
+    <a href="#pengaturan" data-v="pengaturan">Pengaturan</a>
+    <a href="/kasir.html" style="margin-top:auto">Buka layar kasir</a>
+    <a href="/dapur.html">Buka layar dapur</a>
+    <button type="button" id="out">Keluar</button>
+  </nav>
+  <main>
+    <div class="row between" style="flex-wrap:wrap;align-items:flex-end;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:14px" id="tgl"></span><h1 class="display" id="judul" style="margin:0;font-size:36px;font-weight:800;letter-spacing:-1.2px">Ringkasan hari ini</h1></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><a class="btn ghost" style="height:46px;font-size:14px" href="/qr-meja.html" target="_blank">Unduh QR semua meja</a><button type="button" class="btn" style="height:46px;font-size:14px" id="addMenu">+ Tambah menu</button></div>
+    </div>
+
+    <section id="v-dashboard" style="display:flex;flex-direction:column;gap:20px">
+      <div class="cards">
+        <div class="kpi" style="background:var(--ink);color:#fff;border-color:var(--ink)"><span style="color:#9DA19A">Omzet</span><b id="kOmzet" style="color:var(--lime)">-</b><span style="color:#C9CCC9" id="kNaik"></span></div>
+        <div class="kpi"><span>Pesanan</span><b id="kPesanan">-</b><span id="kAktif"></span></div>
+        <div class="kpi"><span>Rata-rata waktu masak</span><b id="kMasak">-</b><span id="kTarget"></span></div>
+        <div class="kpi" style="gap:10px"><span>Metode bayar</span><div style="display:flex;height:10px;border-radius:999px;overflow:hidden;gap:3px"><div id="mQ" style="flex:1;background:var(--ink)"></div><div id="mT" style="flex:0;background:var(--amber)"></div></div><div class="row between" style="font-size:13px;font-weight:600"><span id="lQ">QRIS 0%</span><span class="muted" id="lT">Tunai 0%</span></div></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px">
+        <div class="box" style="flex:2 1 480px"><div class="row between" style="flex-wrap:wrap;gap:6px"><span style="font-size:16px;font-weight:700">Pesanan per jam</span><span class="muted" style="font-size:13px" id="ramai"></span></div><div class="bars" id="bars" role="img" aria-label="Grafik pesanan per jam"></div><div class="jam" id="jam"></div></div>
+        <div class="box" style="flex:1 1 300px"><span style="font-size:16px;font-weight:700">Menu terlaris</span><div id="laris" style="display:flex;flex-direction:column;gap:14px"></div></div>
+      </div>
+    </section>
+
+    <section id="v-menu" class="box" style="display:flex">
+      <div class="row between" style="flex-wrap:wrap;gap:10px"><span style="font-size:16px;font-weight:700">Kelola menu</span>
+        <div class="row" style="gap:6px" id="mfilter"><button type="button" class="chip sm on" data-k="">Semua</button><button type="button" class="chip sm" data-k="makanan">Makanan</button><button type="button" class="chip sm" data-k="minuman">Minuman</button></div></div>
+      <div style="overflow-x:auto"><div style="min-width:680px" id="menuTbl"></div></div>
+    </section>
+
+    <section id="v-pesanan" class="box" hidden><span style="font-size:16px;font-weight:700">Semua pesanan</span><div style="overflow-x:auto"><div style="min-width:640px" id="ordTbl"></div></div></section>
+
+    <section id="v-meja" class="box" hidden>
+      <div class="row between" style="flex-wrap:wrap;gap:10px"><span style="font-size:16px;font-weight:700">Meja &amp; QR</span>
+        <form id="mejaForm" class="row" style="gap:8px"><input id="mejaNo" class="field" style="width:140px;height:40px" placeholder="No. meja baru" maxlength="8" aria-label="Nomor meja baru"><button class="btn" style="height:40px;font-size:14px">Tambah</button></form></div>
+      <div class="qrs" id="qrs"></div>
+    </section>
+
+    <section id="v-laporan" class="box" hidden>
+      <div class="row between" style="flex-wrap:wrap;gap:10px"><span style="font-size:16px;font-weight:700">Laporan 7 hari terakhir</span><a class="btn ghost" style="height:40px;font-size:14px" href="/api/admin/laporan.csv?hari=30">Unduh CSV (30 hari)</a></div>
+      <div style="overflow-x:auto"><div style="min-width:520px" id="lapTbl"></div></div>
+    </section>
+
+    <section id="v-pengaturan" class="box" hidden>
+      <span style="font-size:16px;font-weight:700">Pengaturan</span>
+      <form id="setForm" class="frow" style="max-width:420px">
+        <div><label class="lbl" for="s_nama_resto">Nama restoran</label><input class="field" id="s_nama_resto" maxlength="60"></div>
+        <div><label class="lbl" for="s_merchant_nmid">NMID merchant QRIS</label><input class="field" id="s_merchant_nmid" maxlength="60"></div>
+        <div><label class="lbl" for="s_bayar_menit">Batas waktu bayar QRIS (menit)</label><input class="field" id="s_bayar_menit" inputmode="numeric"></div>
+        <div><label class="lbl" for="s_tunai_menit">Batas waktu bayar tunai (menit)</label><input class="field" id="s_tunai_menit" inputmode="numeric"></div>
+        <div><label class="lbl" for="s_target_masak">Target waktu masak (menit)</label><input class="field" id="s_target_masak" inputmode="numeric"></div>
+        <div><label class="lbl" for="s_telat_menit">Dianggap terlambat setelah (menit)</label><input class="field" id="s_telat_menit" inputmode="numeric"></div>
+        <div class="err" id="setErr" role="alert"></div>
+        <button class="btn" type="submit">Simpan pengaturan</button>
+      </form>
+    </section>
+  </main>
+</div>
+<script src="/js/common.js"></script>
+<script>
+(function () {
+  var $ = function (i) { return document.getElementById(i); };
+  var menu = [], mkat = '';
+  var TITLES = { dashboard: 'Ringkasan hari ini', pesanan: 'Pesanan', menu: 'Menu', meja: 'Meja & QR', laporan: 'Laporan', pengaturan: 'Pengaturan' };
+  $('tgl').textContent = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  $('out').addEventListener('click', DK.logout);
+
+  function view() {
+    var v = (location.hash || '#dashboard').slice(1);
+    if (!TITLES[v]) v = 'dashboard';
+    document.querySelectorAll('nav.side a[data-v]').forEach(function (a) { a.classList.toggle('on', a.dataset.v === v); });
+    $('v-dashboard').hidden = v !== 'dashboard';
+    $('v-menu').hidden = !(v === 'dashboard' || v === 'menu');
+    ['pesanan', 'meja', 'laporan', 'pengaturan'].forEach(function (x) { $('v-' + x).hidden = v !== x; });
+    $('judul').textContent = TITLES[v];
+    ({ dashboard: loadDash, pesanan: loadOrders, menu: loadMenu, meja: loadMeja, laporan: loadLap, pengaturan: loadSet })[v]();
+  }
+  window.addEventListener('hashchange', view);
+
+  function loadDash() {
+    DK.api('/api/admin/ringkasan').then(function (r) {
+      $('kOmzet').textContent = DK.rp(r.omzet);
+      $('kNaik').textContent = r.naik_pct == null ? 'belum ada data kemarin' : (r.naik_pct >= 0 ? '+' : '') + r.naik_pct + '% dari kemarin';
+      $('kPesanan').textContent = r.pesanan; $('kAktif').textContent = r.aktif + ' masih aktif';
+      $('kMasak').textContent = r.rata_masak ? r.rata_masak + ' mnt' : '-'; $('kTarget').textContent = 'target ≤ ' + r.target_masak + ' mnt';
+      var tot = r.qris_n + r.tunai_n, pq = tot ? Math.round(r.qris_n * 100 / tot) : 0;
+      $('mQ').style.flex = tot ? r.qris_n : 1; $('mT').style.flex = tot ? r.tunai_n : 0;
+      $('lQ').textContent = 'QRIS ' + pq + '%'; $('lT').textContent = 'Tunai ' + (tot ? 100 - pq : 0) + '%';
+      var max = Math.max.apply(null, r.per_jam.concat([1])), peak = r.per_jam.indexOf(Math.max.apply(null, r.per_jam));
+      $('bars').innerHTML = r.per_jam.map(function (n, i) {
+        var h = Math.max(4, Math.round(n * 100 / max)), top = n > 0 && i === peak;
+        return '<div title="' + n + ' pesanan" style="height:' + h + '%;background:' + (top ? 'var(--lime)' : n ? 'var(--ink)' : 'var(--line)') + ';' + (top ? 'box-shadow:inset 0 0 0 2px var(--ink)' : '') + '"></div>';
+      }).join('');
+      $('jam').innerHTML = r.per_jam.map(function (_, i) { return '<span>' + (10 + i) + '</span>'; }).join('');
+      $('ramai').textContent = Math.max.apply(null, r.per_jam) > 0 ? 'Jam ramai ' + (10 + peak) + '.00–' + (11 + peak) + '.00' : 'Belum ada pesanan hari ini';
+      $('laris').innerHTML = r.laris.map(function (l, i) {
+        return '<div class="row" style="gap:12px"><span style="width:28px;height:28px;border-radius:999px;background:var(--bg);font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">' + (i + 1) + '</span><span style="flex:1;font-size:14px;font-weight:600">' + DK.esc(l.nama) + '</span><span class="muted" style="font-size:14px">' + l.jml + ' porsi</span></div>';
+      }).join('') || '<span class="muted" style="font-size:14px">Belum ada penjualan hari ini.</span>';
+    }).catch(authErr);
+    loadMenu();
+  }
+
+  function isMinuman(m) { return /minum/i.test(m.kategori); }
+  function loadMenu() {
+    DK.api('/api/admin/menu').then(function (l) { menu = l; paintMenu(); }).catch(authErr);
+  }
+  function paintMenu() {
+    var rows = menu.filter(function (m) { return !mkat || (mkat === 'minuman') === isMinuman(m); });
+    $('menuTbl').innerHTML = '<div class="tbl h menu-cols"><span>Foto</span><span>Nama</span><span>Kategori</span><span>Harga</span><span>Tersedia</span><span></span></div>' + rows.map(function (m) {
+      return '<div class="tbl menu-cols"><span class="thumb">' + (m.foto_url ? '<img src="' + DK.esc(m.foto_url) + '" alt="">' : 'FOTO') + '</span><span style="font-weight:600">' + DK.esc(m.nama) + '</span><span class="muted">' + DK.esc(m.kategori) + '</span><span style="font-weight:600">' + DK.rp(m.harga) + '</span><button type="button" class="sw" data-t="' + m.id + '" aria-pressed="' + m.tersedia + '" aria-label="Tersedia: ' + DK.esc(m.nama) + '"><i></i></button><button type="button" class="chip sm" data-e="' + m.id + '">Ubah</button></div>';
+    }).join('');
+  }
+  $('mfilter').addEventListener('click', function (e) { var b = e.target.closest('[data-k]'); if (!b) return; mkat = b.dataset.k; document.querySelectorAll('#mfilter .chip').forEach(function (x) { x.classList.toggle('on', x === b); }); paintMenu(); });
+  $('menuTbl').addEventListener('click', function (e) {
+    var t = e.target.closest('[data-t]'), ed = e.target.closest('[data-e]');
+    if (t) { var m = menu.filter(function (x) { return x.id === +t.dataset.t; })[0]; DK.api('/api/admin/menu/' + m.id + '/tersedia', { body: { tersedia: !m.tersedia } }).then(loadMenu); }
+    if (ed) editMenu(menu.filter(function (x) { return x.id === +ed.dataset.e; })[0]);
+  });
+  $('addMenu').addEventListener('click', function () { editMenu(null); });
+
+  function editMenu(m) {
+    var ex = m ? m.extras.map(function (e) { return { nama: e.nama, harga: e.harga }; }) : [];
+    var bd = document.createElement('div'); bd.className = 'modal-backdrop';
+    function exHtml() { return ex.map(function (e, i) { return '<div class="row" style="gap:8px"><input class="field" data-xn="' + i + '" value="' + DK.esc(e.nama) + '" placeholder="Nama tambahan" aria-label="Nama tambahan"><input class="field" style="width:110px" data-xh="' + i + '" value="' + e.harga + '" inputmode="numeric" aria-label="Harga tambahan"><button type="button" class="icon-btn" data-xr="' + i + '" aria-label="Hapus tambahan">' + DK.icons.close + '</button></div>'; }).join(''); }
+    bd.innerHTML = '<form class="modal frow" aria-label="' + (m ? 'Ubah menu' : 'Tambah menu') + '"><h2 class="display" style="margin:0;font-size:24px">' + (m ? 'Ubah menu' : 'Tambah menu') + '</h2>' +
+      '<div><label class="lbl" for="f_nama">Nama</label><input class="field" id="f_nama" maxlength="80" required></div>' +
+      '<div class="row" style="gap:10px"><div style="flex:1"><label class="lbl" for="f_kat">Kategori</label><input class="field" id="f_kat" list="kats" maxlength="30" required><datalist id="kats">' + Array.from(new Set(menu.map(function (x) { return x.kategori; }))).map(function (k) { return '<option value="' + DK.esc(k) + '">'; }).join('') + '</datalist></div><div style="flex:1"><label class="lbl" for="f_harga">Harga (Rp)</label><input class="field" id="f_harga" inputmode="numeric" required></div></div>' +
+      '<div><label class="lbl" for="f_desk">Deskripsi</label><textarea class="field" id="f_desk" rows="2"></textarea></div>' +
+      '<div><label class="lbl" for="f_foto">URL foto (opsional)</label><input class="field" id="f_foto" placeholder="https://… atau /img/nama.jpg"></div>' +
+      '<div class="row" style="gap:16px;flex-wrap:wrap"><div><label class="lbl" for="f_wm">Waktu masak (menit)</label><input class="field" style="width:130px" id="f_wm" inputmode="numeric"></div><label class="row" style="gap:8px;font-size:14px;font-weight:600;margin-top:22px"><input type="checkbox" id="f_pedas" style="width:20px;height:20px"> Ada pilihan level pedas</label></div>' +
+      '<div><div class="row between"><span class="lbl" style="margin:0">Pilihan tambahan</span><button type="button" class="chip sm" data-xa>+ Tambah</button></div><div id="exs" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">' + exHtml() + '</div></div>' +
+      '<div class="err" id="fErr" role="alert"></div>' +
+      '<div class="row" style="gap:8px"><button type="button" class="btn ghost" style="flex:1" data-x>Batal</button><button class="btn" style="flex:1" type="submit">Simpan</button></div>' +
+      (m ? '<button type="button" class="btn danger" data-del style="height:44px;font-size:14px">Hapus menu</button>' : '') + '</form>';
+    document.body.appendChild(bd);
+    var f = function (i) { return bd.querySelector('#' + i); };
+    f('f_nama').value = m ? m.nama : ''; f('f_kat').value = m ? m.kategori : ''; f('f_harga').value = m ? m.harga : '';
+    f('f_desk').value = m ? m.deskripsi : ''; f('f_foto').value = m ? m.foto_url : ''; f('f_wm').value = m ? m.waktu_masak : 10; f('f_pedas').checked = m ? m.pedas : false;
+    function syncEx() { bd.querySelectorAll('[data-xn]').forEach(function (i) { ex[+i.dataset.xn].nama = i.value; }); bd.querySelectorAll('[data-xh]').forEach(function (i) { ex[+i.dataset.xh].harga = parseInt(i.value.replace(/\D/g, ''), 10) || 0; }); }
+    bd.addEventListener('click', function (e) {
+      if (e.target === bd || e.target.closest('[data-x]')) { bd.remove(); return; }
+      if (e.target.closest('[data-xa]')) { syncEx(); ex.push({ nama: '', harga: 0 }); f('exs').innerHTML = exHtml(); }
+      var r = e.target.closest('[data-xr]'); if (r) { syncEx(); ex.splice(+r.dataset.xr, 1); f('exs').innerHTML = exHtml(); }
+      if (e.target.closest('[data-del]') && confirm('Hapus menu ini dari daftar?')) DK.api('/api/admin/menu/' + m.id, { method: 'DELETE' }).then(function () { bd.remove(); loadMenu(); });
+    });
+    bd.querySelector('form').addEventListener('submit', function (e) {
+      e.preventDefault(); syncEx();
+      var body = { nama: f('f_nama').value, kategori: f('f_kat').value, harga: parseInt(f('f_harga').value.replace(/\D/g, ''), 10) || 0, deskripsi: f('f_desk').value, foto_url: f('f_foto').value, pedas: f('f_pedas').checked, waktu_masak: parseInt(f('f_wm').value, 10) || 10, extras: ex.filter(function (x) { return x.nama.trim(); }) };
+      DK.api(m ? '/api/admin/menu/' + m.id : '/api/admin/menu', { method: m ? 'PUT' : 'POST', body: body }).then(function () { bd.remove(); loadMenu(); }).catch(function (er) { f('fErr').textContent = er.message; });
+    });
+  }
+
+  var LBL = { menunggu_bayar: 'Belum bayar', baru: 'Baru', dimasak: 'Dimasak', siap: 'Siap', selesai: 'Selesai', batal: 'Batal', kedaluwarsa: 'Kedaluwarsa' };
+  function loadOrders() {
+    DK.api('/api/admin/orders?limit=100').then(function (l) {
+      $('ordTbl').innerHTML = '<div class="tbl h" style="grid-template-columns:100px 70px 1fr 110px 90px 110px"><span>Kode</span><span>Meja</span><span>Isi</span><span>Total</span><span>Metode</span><span>Status</span></div>' + l.map(function (o) {
+        return '<div class="tbl" style="grid-template-columns:100px 70px 1fr 110px 90px 110px"><b>#' + DK.esc(o.kode) + '</b><span class="muted">' + DK.esc(o.meja) + '</span><span class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + DK.esc(o.isi) + '</span><b>' + DK.rp(o.total) + '</b><span>' + (o.metode === 'qris' ? 'QRIS' : 'Tunai') + '</span><span class="tag" style="background:var(--bg);justify-self:start">' + LBL[o.status] + '</span></div>';
+      }).join('') || '<p class="muted">Belum ada pesanan.</p>';
+    }).catch(authErr);
+  }
+  function loadMeja() {
+    DK.api('/api/admin/meja').then(function (l) {
+      $('qrs').innerHTML = l.map(function (m) {
+        return '<div class="qrc" style="' + (m.aktif ? '' : 'opacity:.5') + '"><b class="display" style="font-size:22px">Meja ' + DK.esc(m.no) + '</b>' + (m.aktif ? '<img alt="QR meja ' + DK.esc(m.no) + '" src="/api/meja/' + encodeURIComponent(m.no) + '/qr.svg"><button type="button" class="chip sm" data-off="' + DK.esc(m.no) + '">Nonaktifkan</button>' : '<span class="muted" style="font-size:13px">Nonaktif</span><button type="button" class="chip sm" data-on="' + DK.esc(m.no) + '">Aktifkan</button>') + '</div>';
+      }).join('');
+    }).catch(authErr);
+  }
+  $('qrs').addEventListener('click', function (e) {
+    var off = e.target.closest('[data-off]'), on = e.target.closest('[data-on]');
+    if (off && confirm('Nonaktifkan meja ' + off.dataset.off + '?')) DK.api('/api/admin/meja/' + encodeURIComponent(off.dataset.off) + '/nonaktif', { body: {} }).then(loadMeja);
+    if (on) DK.api('/api/admin/meja', { body: { no: on.dataset.on } }).then(loadMeja);
+  });
+  $('mejaForm').addEventListener('submit', function (e) { e.preventDefault(); DK.api('/api/admin/meja', { body: { no: $('mejaNo').value } }).then(function () { $('mejaNo').value = ''; loadMeja(); }).catch(function (er) { alert(er.message); }); });
+
+  function loadLap() {
+    DK.api('/api/admin/laporan?hari=7').then(function (l) {
+      var cols = 'grid-template-columns:130px 90px 1fr 1fr 1fr';
+      $('lapTbl').innerHTML = '<div class="tbl h" style="' + cols + '"><span>Tanggal</span><span>Pesanan</span><span>QRIS</span><span>Tunai</span><span>Total</span></div>' + l.map(function (r) {
+        return '<div class="tbl" style="' + cols + '"><span>' + r.tanggal + '</span><span>' + r.pesanan + '</span><span>' + DK.rp(r.qris) + '</span><span>' + DK.rp(r.tunai) + '</span><b>' + DK.rp(r.total) + '</b></div>';
+      }).join('');
+    }).catch(authErr);
+  }
+  var KEYS = ['nama_resto', 'merchant_nmid', 'bayar_menit', 'tunai_menit', 'target_masak', 'telat_menit'];
+  function loadSet() { DK.api('/api/admin/settings').then(function (s) { KEYS.forEach(function (k) { $('s_' + k).value = s[k]; }); }).catch(authErr); }
+  $('setForm').addEventListener('submit', function (e) {
+    e.preventDefault(); var b = {}; KEYS.forEach(function (k) { b[k] = $('s_' + k).value; });
+    DK.api('/api/admin/settings', { method: 'PUT', body: b }).then(function () { $('setErr').textContent = ''; DK.toast({ judul: 'Tersimpan', isi: 'Pengaturan diperbarui.', ms: 3000 }); }).catch(function (er) { $('setErr').textContent = er.message; });
+  });
+
+  function authErr(e) { if (e.status === 401 || e.status === 403) location.href = '/login.html?next=/admin.html'; }
+  DK.requireLogin().then(function (me) {
+    if (me.role !== 'admin') { location.href = '/login.html?next=/admin.html'; return; }
+    DK.api('/api/config').then(function (c) { $('brand').textContent = c.nama_resto.toLowerCase() + '.'; });
+    view(); setInterval(function () { if (!document.querySelector('.modal-backdrop') && (location.hash || '#dashboard') === '#dashboard') loadDash(); }, 15000);
+  });
+})();
+</script>
+</body>
+</html>

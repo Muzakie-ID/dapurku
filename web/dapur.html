@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layar Dapur</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+  body { background: #0E100F; color: #fff; }
+  .top { min-height: 84px; padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  .pill { height: 40px; padding: 0 16px; border-radius: 999px; background: #212522; font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; border: none; color: #fff; }
+  .pill .k { color: #9DA19A; }
+  .cols { padding: 0 28px 24px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; padding: 0 16px 24px; } .top { padding: 12px 16px; } }
+  .col { background: #171A18; border-radius: 28px; padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 320px; }
+  .col h2 { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 700; }
+  .dotc { width: 10px; height: 10px; border-radius: 999px; }
+  .ord { background: #212522; border-radius: 22px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .ord.new { box-shadow: inset 0 0 0 2px var(--amber); }
+  .ord.ready { background: var(--lime); color: var(--ink); }
+  .meja { font-family: var(--display); font-size: 30px; font-weight: 800; letter-spacing: -1px; }
+  .badge { height: 30px; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 700; display: flex; align-items: center; }
+  .it { display: flex; gap: 12px; align-items: flex-start; }
+  .q { min-width: 36px; height: 30px; border-radius: 10px; background: #fff; color: var(--ink); font-size: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .ready .q { background: var(--ink); color: #fff; }
+  .act { height: 52px; border-radius: 999px; border: none; font-size: 16px; font-weight: 700; }
+  .empty { padding: 16px; border-radius: 20px; border: 1px dashed #3A3D3A; color: #9DA19A; font-size: 13px; line-height: 1.5; text-align: center; }
+</style>
+</head>
+<body class="dark">
+<div class="top">
+  <div class="row" style="gap:14px"><span class="display" style="font-size:26px;font-weight:800;letter-spacing:-.8px">dapurku.</span><span style="height:30px;padding:0 12px;border-radius:999px;background:#212522;color:#9DA19A;font-size:13px;font-weight:600;display:flex;align-items:center">Layar Dapur</span></div>
+  <div class="row" style="gap:10px;flex-wrap:wrap">
+    <span class="pill"><span class="k">Rata-rata masak</span><span id="avg">-</span></span>
+    <span class="pill"><span class="k">Selesai hari ini</span><span id="done">-</span></span>
+    <button type="button" class="pill" id="snd" aria-pressed="true"><span class="dotc" id="sndDot" style="background:var(--lime)"></span><span id="sndLbl">Online · suara aktif</span></button>
+    <span class="display num" id="clock" style="margin-left:8px;font-size:32px;font-weight:700">--.--</span>
+    <button type="button" class="pill" id="out" aria-label="Keluar">Keluar</button>
+  </div>
+</div>
+<div class="cols">
+  <section class="col" aria-label="Baru masuk"><h2><span class="dotc" style="background:var(--amber)"></span>Baru masuk<span class="display" id="nb" style="margin-left:auto;font-size:22px;font-weight:800;color:var(--amber)">0</span></h2><div id="cb" style="display:flex;flex-direction:column;gap:12px"></div></section>
+  <section class="col" aria-label="Sedang dimasak"><h2><span class="dotc" style="background:#fff"></span>Sedang dimasak<span class="display" id="nm" style="margin-left:auto;font-size:22px;font-weight:800">0</span></h2><div id="cm" style="display:flex;flex-direction:column;gap:12px"></div></section>
+  <section class="col" aria-label="Siap antar"><h2><span class="dotc" style="background:var(--lime)"></span>Siap antar<span class="display" id="ns" style="margin-left:auto;font-size:22px;font-weight:800;color:var(--lime)">0</span></h2><div id="cs" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="empty" style="margin-top:auto">Pesanan baru muncul otomatis begitu pelanggan selesai bayar.</div></section>
+</div>
+<script src="/js/common.js"></script>
+<script>
+(function () {
+  var $ = function (i) { return document.getElementById(i); };
+  function items(o, dark) {
+    return o.items.map(function (i) {
+      return '<div class="it"><span class="q">' + i.qty + '×</span><span style="display:flex;flex-direction:column;gap:4px;padding-top:4px"><span style="font-size:17px;font-weight:600">' + DK.esc(i.nama) + '</span>' +
+        (i.note && !dark ? '<span style="font-size:14px;font-weight:600;color:var(--amber)">↳ ' + DK.esc(i.note) + '</span>' : '') + '</span></div>';
+    }).join('');
+  }
+  function head(o, badge) { return '<div class="row between"><span class="meja">Meja ' + DK.esc(o.meja) + '</span>' + badge + '</div><span style="font-size:13px;color:' + (o.status === 'siap' ? '#3A4A1C' : '#9DA19A') + '">#' + DK.esc(o.kode) + ' · lunas ' + DK.jam(o.paid_at) + '</span>'; }
+  function card(o) {
+    if (o.status === 'baru') return '<div class="ord new">' + head(o, '<span class="badge" style="background:var(--amber);color:var(--ink)">BARU · ' + o.mnt + ' mnt</span>') + '<div style="display:flex;flex-direction:column;gap:8px">' + items(o) + '</div><button class="act" style="background:var(--amber);color:var(--ink)" data-id="' + o.id + '" data-to="dimasak">Mulai masak</button></div>';
+    if (o.status === 'dimasak') {
+      var b = o.telat ? '<span class="badge" style="background:#FF6B57;color:var(--ink);font-weight:800">TERLAMBAT · ' + o.mnt + ' mnt</span>' : '<span class="badge" style="background:#2E332F">' + o.mnt + ' mnt</span>';
+      return '<div class="ord">' + head(o, b) + '<div style="display:flex;flex-direction:column;gap:8px">' + items(o) + '</div><button class="act" style="background:#fff;color:var(--ink)" data-id="' + o.id + '" data-to="siap">Tandai siap</button></div>';
+    }
+    return '<div class="ord ready">' + head(o, '<span class="badge" style="background:var(--ink);color:var(--lime)">SIAP · ' + o.mnt + ' mnt</span>') + '<div style="display:flex;flex-direction:column;gap:8px">' + items(o, true) + '</div><button class="act" style="background:var(--ink);color:#fff" data-id="' + o.id + '" data-to="selesai">Sudah diantar</button></div>';
+  }
+  var seen = null;
+  function load() {
+    return DK.api('/api/staff/dapur').then(function (d) {
+      $('cb').innerHTML = d.baru.map(card).join('') || '<div class="empty">Belum ada pesanan baru.</div>';
+      $('cm').innerHTML = d.masak.map(card).join('') || '<div class="empty">Tidak ada yang sedang dimasak.</div>';
+      $('cs').innerHTML = d.siap.map(card).join('') || '<div class="empty">Belum ada yang siap.</div>';
+      $('nb').textContent = d.baru.length; $('nm').textContent = d.masak.length; $('ns').textContent = d.siap.length;
+      $('avg').textContent = d.stat.rata_masak ? d.stat.rata_masak + ' mnt' : '-';
+      $('done').textContent = d.stat.selesai_hari_ini;
+    }).catch(function (e) { if (e.status === 401 || e.status === 403) location.href = '/login.html?next=/dapur.html'; });
+  }
+  function clock() { var d = new Date(); $('clock').textContent = String(d.getHours()).padStart(2, '0') + '.' + String(d.getMinutes()).padStart(2, '0'); }
+  clock(); setInterval(clock, 10000);
+  function snd() { var m = DK.muted(); $('sndLbl').textContent = m ? 'Online · suara mati' : 'Online · suara aktif'; $('sndDot').style.background = m ? '#9DA19A' : 'var(--lime)'; $('snd').setAttribute('aria-pressed', !m); }
+  $('snd').addEventListener('click', function () { DK.setMuted(!DK.muted()); snd(); if (!DK.muted()) DK.chime(true); });
+  snd();
+  $('out').addEventListener('click', DK.logout);
+
+  document.body.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-id]'); if (!b) return;
+    b.disabled = true;
+    DK.api('/api/staff/orders/' + b.dataset.id + '/status', { body: { to: b.dataset.to } }).then(load).catch(function (er) { DK.toast({ judul: 'Gagal', isi: er.message }); load(); });
+  });
+
+  DK.requireLogin().then(function () {
+    load(); setInterval(load, 5000);
+    DK.listen('/api/staff/events', function (n) {
+      if (n.tipe === 'pesanan_baru') { DK.chime(); DK.toast({ judul: n.judul, isi: n.isi }); }
+      else if (n.tipe === 'telat') DK.toast({ judul: n.judul, isi: n.isi });
+      load();
+    });
+  });
+})();
+</script>
+</body>
+</html>
