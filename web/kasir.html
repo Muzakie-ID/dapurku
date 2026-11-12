@@ -202,7 +202,8 @@
     document.body.appendChild(bd);
   });
 
-  DK.requireLogin().then(function () {
+  DK.requireLogin().then(function (me) {
+    if (me.role !== 'kasir' && me.role !== 'admin') { location.href = '/login.html?next=/kasir.html'; return; }
     load(); setInterval(function () { load().then(function () { if (!document.activeElement || document.activeElement.id !== 'uang') loadSide(); }); }, 6000);
     DK.listen('/api/staff/events', function (n) {
       DK.chime(); DK.toast({ judul: n.judul, isi: n.isi });

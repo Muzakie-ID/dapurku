@@ -221,7 +221,11 @@ pub async fn bayar_tunai(State(s): State<S>, auth: Auth, Path(id): Path<i64>, Js
     if b.uang < total {
         return Err(bad("uang yang diterima kurang dari total"));
     }
-    orders::mark_paid(&conn, id, "tunai", b.uang, &format!("CASH-{id}"), Some(b.uang), Some(b.uang - total), Some(auth.nama.as_str()))?;
+    let baru = orders::mark_paid(&conn, id, "tunai", b.uang, &format!("CASH-{id}"), Some(b.uang), Some(b.uang - total), Some(auth.nama.as_str()))?;
+    if !baru {
+        // Sudah lunas sebelumnya. Jangan balas sukses: kasir bisa menyerahkan kembalian dua kali.
+        return Err(conflict("pesanan ini sudah lunas"));
+    }
     Ok(Json(json!({ "ok": true, "kembalian": b.uang - total })))
 }
 
@@ -232,7 +236,10 @@ pub async fn konfirmasi_qris(State(s): State<S>, auth: Auth, Path(id): Path<i64>
     let total: i64 = conn
         .query_row("SELECT total FROM orders WHERE id = ?1", params![id], |r| r.get(0))
         .map_err(|_| not_found("pesanan tidak ditemukan"))?;
-    orders::mark_paid(&conn, id, "qris", total, &format!("MANUAL-{id}"), None, None, Some(auth.nama.as_str()))?;
+    let baru = orders::mark_paid(&conn, id, "qris", total, &format!("MANUAL-{id}"), None, None, Some(auth.nama.as_str()))?;
+    if !baru {
+        return Err(conflict("pesanan ini sudah lunas"));
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
