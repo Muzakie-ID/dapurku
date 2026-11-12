@@ -88,7 +88,7 @@
 
     <section id="v-laporan" class="box" hidden>
       <div class="row between" style="flex-wrap:wrap;gap:10px"><span style="font-size:16px;font-weight:700">Laporan 7 hari terakhir</span><a class="btn ghost" style="height:40px;font-size:14px" href="/api/admin/laporan.csv?hari=30">Unduh CSV (30 hari)</a></div>
-      <div style="overflow-x:auto"><div style="min-width:520px" id="lapTbl"></div></div>
+      <div style="overflow-x:auto"><div style="min-width:620px" id="lapTbl"></div></div>
     </section>
 
     <section id="v-pengaturan" class="box" hidden>
@@ -244,9 +244,9 @@
 
   function loadLap() {
     DK.api('/api/admin/laporan?hari=7').then(function (l) {
-      var cols = 'grid-template-columns:130px 90px 1fr 1fr 1fr';
-      $('lapTbl').innerHTML = '<div class="tbl h" style="' + cols + '"><span>Tanggal</span><span>Pesanan</span><span>QRIS</span><span>Tunai</span><span>Total</span></div>' + l.map(function (r) {
-        return '<div class="tbl" style="' + cols + '"><span>' + r.tanggal + '</span><span>' + r.pesanan + '</span><span>' + DK.rp(r.qris) + '</span><span>' + DK.rp(r.tunai) + '</span><b>' + DK.rp(r.total) + '</b></div>';
+      var cols = 'grid-template-columns:130px 90px 1fr 1fr 1fr 1fr';
+      $('lapTbl').innerHTML = '<div class="tbl h" style="' + cols + '"><span>Tanggal</span><span>Pesanan</span><span>QRIS</span><span>Tunai</span><span>Pengembalian</span><span>Total</span></div>' + l.map(function (r) {
+        return '<div class="tbl" style="' + cols + '"><span>' + r.tanggal + '</span><span>' + r.pesanan + '</span><span>' + DK.rp(r.qris) + '</span><span>' + DK.rp(r.tunai) + '</span><span class="muted">' + (r.refund ? '-' + DK.rp(r.refund) : '-') + '</span><b>' + DK.rp(r.total) + '</b></div>';
       }).join('');
     }).catch(authErr);
   }

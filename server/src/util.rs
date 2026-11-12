@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[derive(Debug)]
 pub struct AppError(pub StatusCode, pub String);
 pub type R<T> = Result<T, AppError>;
 
@@ -88,4 +89,47 @@ pub fn rand_token(n: usize) -> String {
     (0..n)
         .map(|_| A[rng.gen_range(0..A.len())] as char)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_rupiah() {
+        assert_eq!(rupiah(0), "Rp0");
+        assert_eq!(rupiah(999), "Rp999");
+        assert_eq!(rupiah(1000), "Rp1.000");
+        assert_eq!(rupiah(36000), "Rp36.000");
+        assert_eq!(rupiah(1234567), "Rp1.234.567");
+        assert_eq!(rupiah(-2000), "-Rp2.000");
+    }
+
+    #[test]
+    fn format_kode_pesanan() {
+        assert_eq!(kode(1), "DPK-0001");
+        assert_eq!(kode(143), "DPK-0143");
+        assert_eq!(kode(12345), "DPK-12345");
+    }
+
+    #[test]
+    fn awal_hari_mengikuti_zona_restoran() {
+        // WIB = UTC+7. 2024-01-01 00:30 WIB = 2023-12-31 17:30 UTC.
+        let wib = 420;
+        let t = 1704044400; // 2023-12-31T17:00:00Z
+        let d0 = day_start(t, wib);
+        assert_eq!(d0, 1704042000, "awal hari WIB = 17:00 UTC hari sebelumnya");
+        assert!(d0 <= t && t < d0 + 86400);
+        // satu detik sebelum tengah malam WIB masih hari yang sama
+        assert_eq!(day_start(d0 + 86399, wib), d0);
+        assert_eq!(day_start(d0 + 86400, wib), d0 + 86400);
+    }
+
+    #[test]
+    fn token_acak_panjangnya_pas_dan_berbeda() {
+        let a = rand_token(16);
+        let b = rand_token(16);
+        assert_eq!(a.chars().count(), 16);
+        assert_ne!(a, b);
+    }
 }

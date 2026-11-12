@@ -140,17 +140,21 @@ pub async fn kasir(State(s): State<S>, auth: Auth) -> R<Json<Value>> {
     let conn = s.db.lock().unwrap();
     let n = now();
     let d0 = day_start(n, s.cfg.tz);
-    // Fix B: pesanan yang sudah dibatalkan tidak dihitung, supaya angka di layar
-    // kasir sama dengan omzet di layar admin (omzet_between memakai filter yang sama).
+    // Fix B + C: omzet bersih = pembayaran dikurangi pengembalian dana, memakai
+    // rumus yang sama persis dengan layar admin supaya kedua angka tidak berbeda.
     let sum = |m: &str| -> rusqlite::Result<i64> {
         conn.query_row(
-            "SELECT COALESCE(SUM(p.jumlah),0) FROM payments p JOIN orders o ON o.id = p.order_id
-              WHERE p.metode = ?1 AND p.created_at >= ?2 AND o.status != 'batal'",
+            "SELECT (SELECT COALESCE(SUM(jumlah),0) FROM payments WHERE metode = ?1 AND created_at >= ?2)
+                  - (SELECT COALESCE(SUM(jumlah),0) FROM refunds  WHERE metode = ?1 AND created_at >= ?2)",
             params![m, d0], |r| r.get(0),
         )
     };
     let qris = sum("qris")?;
     let tunai = sum("tunai")?;
+    let refund: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(jumlah),0) FROM refunds WHERE created_at >= ?1",
+        params![d0], |r| r.get(0),
+    )?;
     let aktif: i64 = conn.query_row("SELECT COUNT(*) FROM orders WHERE status IN ('baru','dimasak','siap')", [], |r| r.get(0))?;
     let menunggu: i64 = conn.query_row("SELECT COUNT(*) FROM orders WHERE status = 'menunggu_bayar'", [], |r| r.get(0))?;
 
@@ -185,7 +189,7 @@ pub async fn kasir(State(s): State<S>, auth: Auth) -> R<Json<Value>> {
         meja.push(json!({ "no": no, "state": state, "info": info }));
     }
     Ok(Json(json!({
-        "stat": { "qris": qris, "tunai": tunai, "aktif": aktif, "menunggu": menunggu },
+        "stat": { "qris": qris, "tunai": tunai, "aktif": aktif, "menunggu": menunggu, "refund": refund },
         "meja": meja,
         "nama": auth.nama,
     })))
@@ -249,7 +253,7 @@ pub async fn konfirmasi_qris(State(s): State<S>, auth: Auth, Path(id): Path<i64>
 pub async fn batal(State(s): State<S>, auth: Auth, Path(id): Path<i64>) -> R<Json<Value>> {
     auth.need(&["kasir"])?;
     let conn = s.db.lock().unwrap();
-    orders::cancel(&conn, id, true)?;
+    orders::cancel(&conn, id, true, Some(auth.nama.as_str()))?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -277,10 +281,13 @@ fn ymd(t: i64, tz_min: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// Omzet bersih satu periode: pembayaran dikurangi pengembalian dana yang terjadi
+/// di periode itu. Tidak memakai status pesanan, supaya pembatalan hari ini tidak
+/// mengubah angka hari kemarin yang sudah terlanjur dilaporkan.
 fn omzet_between(conn: &Connection, a: i64, b: i64) -> rusqlite::Result<i64> {
     conn.query_row(
-        "SELECT COALESCE(SUM(p.jumlah),0) FROM payments p JOIN orders o ON o.id = p.order_id
-          WHERE p.created_at >= ?1 AND p.created_at < ?2 AND o.status != 'batal'",
+        "SELECT (SELECT COALESCE(SUM(jumlah),0) FROM payments WHERE created_at >= ?1 AND created_at < ?2)
+              - (SELECT COALESCE(SUM(jumlah),0) FROM refunds  WHERE created_at >= ?1 AND created_at < ?2)",
         params![a, b], |r| r.get(0),
     )
 }
@@ -304,6 +311,8 @@ pub async fn ringkasan(State(s): State<S>, auth: Auth) -> R<Json<Value>> {
     let rata: Option<f64> = conn.query_row(
         "SELECT AVG(ready_at - cooking_at) FROM orders WHERE ready_at IS NOT NULL AND cooking_at IS NOT NULL AND created_at >= ?1",
         params![d0], |r| r.get(0))?;
+    let refund: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(jumlah),0) FROM refunds WHERE created_at >= ?1", params![d0], |r| r.get(0))?;
     let qris_n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM orders WHERE paid_at >= ?1 AND metode = 'qris' AND status != 'batal'", params![d0], |r| r.get(0))?;
     let tunai_n: i64 = conn.query_row(
@@ -327,7 +336,7 @@ pub async fn ringkasan(State(s): State<S>, auth: Auth) -> R<Json<Value>> {
         .query_map(params![d0], |r| Ok(json!({ "nama": r.get::<_, String>(0)?, "jml": r.get::<_, i64>(1)? })))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(json!({
-        "omzet": omzet, "naik_pct": naik_pct, "pesanan": pesanan, "aktif": aktif,
+        "omzet": omzet, "naik_pct": naik_pct, "pesanan": pesanan, "aktif": aktif, "refund": refund,
         "rata_masak": rata.map(|v| (v / 60.0).round() as i64).unwrap_or(0),
         "target_masak": setting_i(&conn, "target_masak", 15),
         "qris_n": qris_n, "tunai_n": tunai_n, "per_jam": per_jam, "laris": laris,
@@ -496,18 +505,23 @@ fn laporan_rows(conn: &Connection, tz: i64, hari: i64) -> rusqlite::Result<Vec<V
         let b = a + 86400;
         let per = |m: &str| -> rusqlite::Result<i64> {
             conn.query_row(
-                "SELECT COALESCE(SUM(p.jumlah),0) FROM payments p JOIN orders o ON o.id = p.order_id
-                  WHERE p.metode = ?1 AND p.created_at >= ?2 AND p.created_at < ?3 AND o.status != 'batal'",
+                "SELECT (SELECT COALESCE(SUM(jumlah),0) FROM payments WHERE metode = ?1 AND created_at >= ?2 AND created_at < ?3)
+                      - (SELECT COALESCE(SUM(jumlah),0) FROM refunds  WHERE metode = ?1 AND created_at >= ?2 AND created_at < ?3)",
                 params![m, a, b], |r| r.get(0),
             )
         };
         let qris = per("qris")?;
         let tunai = per("tunai")?;
+        let refund: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(jumlah),0) FROM refunds WHERE created_at >= ?1 AND created_at < ?2",
+            params![a, b], |r| r.get(0),
+        )?;
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM orders WHERE paid_at >= ?1 AND paid_at < ?2 AND status != 'batal'",
             params![a, b], |r| r.get(0),
         )?;
-        out.push(json!({ "tanggal": ymd(a, tz), "pesanan": n, "qris": qris, "tunai": tunai, "total": qris + tunai }));
+        out.push(json!({ "tanggal": ymd(a, tz), "pesanan": n, "qris": qris, "tunai": tunai,
+                         "refund": refund, "total": qris + tunai }));
     }
     Ok(out)
 }
@@ -527,11 +541,11 @@ pub async fn laporan_csv(State(s): State<S>, auth: Auth, Query(q): Query<HariQ>)
     auth.need(&[])?;
     let conn = s.db.lock().unwrap();
     let rows = laporan_rows(&conn, s.cfg.tz, q.hari.unwrap_or(30).clamp(1, 365))?;
-    let mut csv = String::from("tanggal,pesanan,omzet_qris,omzet_tunai,omzet_total\n");
+    let mut csv = String::from("tanggal,pesanan,omzet_qris,omzet_tunai,pengembalian,omzet_total\n");
     for r in rows {
         csv.push_str(&format!(
-            "{},{},{},{},{}\n",
-            r["tanggal"].as_str().unwrap_or(""), r["pesanan"], r["qris"], r["tunai"], r["total"]
+            "{},{},{},{},{},{}\n",
+            r["tanggal"].as_str().unwrap_or(""), r["pesanan"], r["qris"], r["tunai"], r["refund"], r["total"]
         ));
     }
     Ok((

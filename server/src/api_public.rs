@@ -211,7 +211,7 @@ pub async fn simulate_pay(State(s): State<S>, Path(token): Path<String>) -> R<Js
 pub async fn customer_cancel(State(s): State<S>, Path(token): Path<String>) -> R<Json<Value>> {
     let conn = s.db.lock().unwrap();
     let id = order_id_by_token(&conn, &token)?;
-    orders::cancel(&conn, id, false)?;
+    orders::cancel(&conn, id, false, None)?;
     Ok(Json(json!({ "ok": true })))
 }
 

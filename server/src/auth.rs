@@ -75,3 +75,35 @@ impl Auth {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn password_cocok_dengan_hashnya() {
+        let h = hash_password("rahasia123");
+        assert!(verify_password(&h, "rahasia123"));
+        assert!(!verify_password(&h, "rahasia124"));
+        assert!(!verify_password(&h, ""));
+    }
+
+    #[test]
+    fn hash_tidak_menyimpan_password_apa_adanya() {
+        let h = hash_password("rahasia123");
+        assert!(!h.contains("rahasia123"));
+        assert!(h.starts_with("$argon2"));
+    }
+
+    #[test]
+    fn dua_hash_dari_password_sama_tetap_berbeda() {
+        // salt acak: dua pengguna dengan password sama tidak terlihat sama di database
+        assert_ne!(hash_password("rahasia123"), hash_password("rahasia123"));
+    }
+
+    #[test]
+    fn hash_rusak_ditolak_bukan_panik() {
+        assert!(!verify_password("bukan-hash", "apa pun"));
+        assert!(!verify_password("", "apa pun"));
+    }
+}
