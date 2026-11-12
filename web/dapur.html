@@ -88,7 +88,8 @@
     DK.api('/api/staff/orders/' + b.dataset.id + '/status', { body: { to: b.dataset.to } }).then(load).catch(function (er) { DK.toast({ judul: 'Gagal', isi: er.message }); load(); });
   });
 
-  DK.requireLogin().then(function () {
+  DK.requireLogin().then(function (me) {
+    if (me.role !== 'dapur' && me.role !== 'admin') { location.href = '/login.html?next=/dapur.html'; return; }
     load(); setInterval(load, 5000);
     DK.listen('/api/staff/events', function (n) {
       if (n.tipe === 'pesanan_baru') { DK.chime(); DK.toast({ judul: n.judul, isi: n.isi }); }

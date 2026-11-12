@@ -225,11 +225,11 @@ pub async fn panggil(State(s): State<S>, Path(token): Path<String>) -> R<Json<Va
         return Err(conflict("pesanan sudah tidak aktif"));
     }
     // dedupe per menit supaya tidak bisa di-spam
-    let dk = format!("{id}:panggil:{}", now() / 60);
+    let menit = now() / 60;
     push(&conn, Some(id), "kasir", "panggil_pelayan", &format!("Meja {meja} memanggil pelayan"),
-         &format!("#{}", kode(id)), Some(&dk))?;
+         &format!("#{}", kode(id)), Some(&format!("{id}:panggil:{menit}:kasir")))?;
     push(&conn, Some(id), "pembeli", "pelayan_dipanggil", "Pelayan dipanggil",
-         "Pelayan segera menuju mejamu.", Some(&dk))?;
+         "Pelayan segera menuju mejamu.", Some(&format!("{id}:panggil:{menit}:pembeli")))?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -266,13 +266,25 @@ pub async fn webhook_qris(State(s): State<S>, headers: HeaderMap, body: Bytes) -
     if h.status != "PAID" {
         return Ok(Json(json!({ "ok": true, "diabaikan": true })));
     }
-    let id: i64 = h.kode.trim_start_matches("DPK-").parse().map_err(|_| bad("kode tidak valid"))?;
+    let kode_bersih = h.kode.trim();
+    let id: i64 = kode_bersih
+        .strip_prefix("DPK-")
+        .unwrap_or(kode_bersih)
+        .parse()
+        .map_err(|_| bad("kode tidak valid"))?;
     let conn = s.db.lock().unwrap();
-    let metode: String = conn
-        .query_row("SELECT metode FROM orders WHERE id = ?1", params![id], |r| r.get(0))
+    let (metode, total): (String, i64) = conn
+        .query_row("SELECT metode, total FROM orders WHERE id = ?1", params![id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .map_err(|_| not_found("pesanan tidak ditemukan"))?;
     if metode != "qris" {
         return Err(conflict("pesanan ini bukan pesanan QRIS"));
+    }
+    // Fix 3b: nominal harus sama persis. Kalau lebih besar, kelebihannya tidak
+    // tercatat di payments.jumlah (yang menyimpan total), jadi tolak daripada hilang.
+    if h.amount != total {
+        return Err(bad("jumlah bayar tidak sama dengan total pesanan"));
     }
     let baru = orders::mark_paid(&conn, id, "qris", h.amount, &format!("QRIS-{}", h.ref_), None, None, None)?;
     Ok(Json(json!({ "ok": true, "baru": baru })))
