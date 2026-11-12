@@ -89,15 +89,3 @@ pub fn rand_token(n: usize) -> String {
         .map(|_| A[rng.gen_range(0..A.len())] as char)
         .collect()
 }
-
-pub fn ct_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for i in 0..a.len() {
-        diff |= a[i] ^ b[i];
-    }
-    diff == 0
-}

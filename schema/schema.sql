@@ -95,10 +95,23 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notif_order ON notifications(order_id, id);
 CREATE INDEX IF NOT EXISTS idx_notif_aud   ON notifications(audience, id);
 
+-- Akun staf. Login memakai username + password (hash Argon2id, bukan PIN bersama).
+CREATE TABLE IF NOT EXISTS users (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  username   TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+  pass_hash  TEXT    NOT NULL,
+  role       TEXT    NOT NULL CHECK (role IN ('kasir','dapur','admin')),
+  nama       TEXT    NOT NULL,
+  aktif      INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  last_login INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,
   role       TEXT NOT NULL CHECK (role IN ('kasir','dapur','admin')),
   nama       TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  user_id    INTEGER REFERENCES users(id)
 );

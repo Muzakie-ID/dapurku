@@ -8,6 +8,9 @@ mod sse;
 mod util;
 
 use axum::{
+    extract::{Path, State},
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     routing::{get, post, put},
     Router,
 };
@@ -19,9 +22,6 @@ pub struct Config {
     pub web_dir: String,
     pub sim: bool,
     pub webhook_secret: String,
-    pub pin_kasir: String,
-    pub pin_dapur: String,
-    pub pin_admin: String,
     pub tz: i64, // menit di atas UTC, WIB = 420
     pub base_url: String,
 }
@@ -35,6 +35,24 @@ fn env(k: &str, d: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| d.to_string())
 }
 
+/// Sajikan halaman tanpa menulis akhiran .html: /login -> web/login.html.
+/// Akhiran .html tetap dilayani supaya tautan lama tidak mati.
+async fn halaman(State(s): State<Arc<App>>, Path(nama): Path<String>) -> Response {
+    let nama = nama.strip_suffix(".html").unwrap_or(&nama);
+    let aman = !nama.is_empty()
+        && nama.len() <= 48
+        && nama
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+    if aman {
+        let berkas = format!("{}/{}.html", s.cfg.web_dir, nama);
+        if let Ok(isi) = tokio::fs::read_to_string(&berkas).await {
+            return ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], isi).into_response();
+        }
+    }
+    (StatusCode::NOT_FOUND, "halaman tidak ditemukan").into_response()
+}
+
 #[tokio::main]
 async fn main() {
     let db_path = env("DATABASE_PATH", "../data/dapurku.db");
@@ -43,14 +61,11 @@ async fn main() {
         web_dir: env("WEB_DIR", "../web"),
         sim: env("PAYMENT_MODE", "sim") == "sim",
         webhook_secret: env("WEBHOOK_SECRET", "dev-secret-ganti-di-produksi"),
-        pin_kasir: env("KASIR_PIN", "1111"),
-        pin_dapur: env("DAPUR_PIN", "2222"),
-        pin_admin: env("ADMIN_PIN", "9999"),
         tz: env("TZ_OFFSET_MIN", "420").parse().unwrap_or(420),
         base_url: env("BASE_URL", ""),
     };
-    if cfg.pin_admin == "9999" || cfg.webhook_secret.starts_with("dev-secret") {
-        eprintln!("PERINGATAN: PIN/secret masih default. Ganti lewat env sebelum dipakai sungguhan.");
+    if cfg.webhook_secret.starts_with("dev-secret") {
+        eprintln!("PERINGATAN: WEBHOOK_SECRET masih default. Ganti lewat env sebelum dipakai sungguhan.");
     }
     if cfg.sim {
         eprintln!("Mode pembayaran: SIMULASI (tombol 'sudah bayar' aktif). Set PAYMENT_MODE=live untuk mematikan.");
@@ -102,6 +117,10 @@ async fn main() {
         .route("/api/admin/laporan", get(s::laporan))
         .route("/api/admin/laporan.csv", get(s::laporan_csv))
         .route("/api/admin/settings", get(s::settings_get).put(s::settings_put))
+        .route("/api/admin/users", get(s::users_list).post(s::user_create))
+        .route("/api/admin/users/:id", put(s::user_update))
+        // halaman tanpa akhiran .html: /login, /kasir, /dapur, ...
+        .route("/:halaman", get(halaman))
         .with_state(state)
         .fallback_service(ServeDir::new(web_dir).append_index_html_on_directories(true));
 

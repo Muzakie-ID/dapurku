@@ -294,36 +294,59 @@ pub async fn webhook_qris(State(s): State<S>, headers: HeaderMap, body: Bytes) -
 
 #[derive(Deserialize)]
 pub struct Login {
-    role: String,
-    pin: String,
-    nama: Option<String>,
+    username: String,
+    password: String,
+}
+
+/// Hash pembanding supaya username yang tidak ada tetap memakan waktu hitung
+/// yang mirip; tanpa ini, lama jawaban membocorkan username mana yang terdaftar.
+fn hash_umpan() -> &'static str {
+    static H: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    H.get_or_init(|| crate::auth::hash_password("umpan"))
 }
 
 pub async fn login(State(s): State<S>, Json(b): Json<Login>) -> R<Response> {
-    let benar = match b.role.as_str() {
-        "kasir" => &s.cfg.pin_kasir,
-        "dapur" => &s.cfg.pin_dapur,
-        "admin" => &s.cfg.pin_admin,
-        _ => return Err(bad("role tidak dikenal")),
+    let uname = b.username.trim().to_lowercase();
+    let akun: Option<(i64, String, String, String)> = {
+        let conn = s.db.lock().unwrap();
+        conn.query_row(
+            "SELECT id, pass_hash, role, nama FROM users WHERE username = ?1 AND aktif = 1",
+            params![uname],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .ok()
     };
-    if !ct_eq(&b.pin, benar) {
+    let salah = || AppError(axum::http::StatusCode::UNAUTHORIZED, "username atau password salah".into());
+    let (uid, hash, role, nama) = match akun {
+        Some(v) => v,
+        None => {
+            crate::auth::verify_password(hash_umpan(), &b.password);
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            return Err(salah());
+        }
+    };
+    if !crate::auth::verify_password(&hash, &b.password) {
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-        return Err(AppError(axum::http::StatusCode::UNAUTHORIZED, "PIN salah".into()));
+        return Err(salah());
     }
-    let nama: String = b.nama.unwrap_or_default().trim().chars().take(40).collect();
-    let nama = if nama.is_empty() { b.role.clone() } else { nama };
     let token = format!("{}{}", rand_token(24), rand_token(24));
     let n = now();
     {
         let conn = s.db.lock().unwrap();
         conn.execute("DELETE FROM sessions WHERE expires_at < ?1", params![n])?;
         conn.execute(
-            "INSERT INTO sessions(token, role, nama, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![token, b.role, nama, n, n + 12 * 3600],
+            "INSERT INTO sessions(token, role, nama, created_at, expires_at, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![token, role, nama, n, n + 12 * 3600, uid],
         )?;
+        conn.execute("UPDATE users SET last_login = ?2 WHERE id = ?1", params![uid, n])?;
     }
     let ck = format!("dk_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200");
-    Ok(([(header::SET_COOKIE, ck)], Json(json!({ "ok": true, "role": b.role, "nama": nama }))).into_response())
+    Ok((
+        [(header::SET_COOKIE, ck)],
+        Json(json!({ "ok": true, "role": role, "nama": nama, "username": uname })),
+    )
+        .into_response())
 }
 
 pub async fn logout(State(s): State<S>, headers: HeaderMap) -> R<Response> {
@@ -336,5 +359,5 @@ pub async fn logout(State(s): State<S>, headers: HeaderMap) -> R<Response> {
 }
 
 pub async fn me(auth: Auth) -> Json<Value> {
-    Json(json!({ "role": auth.role, "nama": auth.nama }))
+    Json(json!({ "role": auth.role, "nama": auth.nama, "username": auth.username }))
 }

@@ -222,13 +222,22 @@ pub fn mark_paid(
     kasir: Option<&str>,
 ) -> R<bool> {
     let tx = conn.unchecked_transaction()?;
-    let (status, total, meja): (String, i64, String) = tx
+    let (status, total, meja, metode_pesanan): (String, i64, String, String) = tx
         .query_row(
-            "SELECT status, total, meja_no FROM orders WHERE id = ?1",
+            "SELECT status, total, meja_no, metode FROM orders WHERE id = ?1",
             params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .map_err(|_| not_found("pesanan tidak ditemukan"))?;
+
+    // Fix A: metode pembayaran tidak boleh ditimpa diam-diam. Tanpa penjagaan ini
+    // pesanan tunai bisa ditutup lewat "konfirmasi QRIS" tanpa ada uang masuk,
+    // dan kolom metode ikut berubah sehingga jejaknya hilang.
+    if metode_pesanan != metode {
+        return Err(conflict(&format!(
+            "pesanan ini dibayar {metode_pesanan}, bukan {metode}"
+        )));
+    }
 
     if status == "batal" || status == "kedaluwarsa" {
         return Err(conflict("pesanan sudah dibatalkan atau kedaluwarsa"));
@@ -247,10 +256,10 @@ pub fn mark_paid(
         return Ok(false);
     }
     tx.execute(
-        "UPDATE orders SET status = 'baru', paid_at = ?2, metode = ?3,
-                uang_diterima = ?4, kembalian = ?5, kasir = ?6
+        "UPDATE orders SET status = 'baru', paid_at = ?2,
+                uang_diterima = ?3, kembalian = ?4, kasir = ?5
          WHERE id = ?1",
-        params![id, now(), metode, uang, kembalian, kasir],
+        params![id, now(), uang, kembalian, kasir],
     )?;
 
     let k = kode(id);

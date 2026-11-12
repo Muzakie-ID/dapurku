@@ -1,5 +1,7 @@
 use crate::util::*;
 use crate::App;
+use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::Argon2;
 use axum::{async_trait, extract::FromRequestParts, http::request::Parts, http::HeaderMap};
 use rusqlite::params;
 use std::sync::Arc;
@@ -7,6 +9,24 @@ use std::sync::Arc;
 pub struct Auth {
     pub role: String,
     pub nama: String,
+    pub username: String,
+}
+
+/// Hash password dengan Argon2id. Hasilnya format PHC, salt sudah ikut di dalamnya.
+pub fn hash_password(pw: &str) -> String {
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(pw.as_bytes(), &salt)
+        .expect("gagal menghitung hash password")
+        .to_string()
+}
+
+/// Cocokkan password dengan hash tersimpan. Hash rusak = selalu gagal, bukan panik.
+pub fn verify_password(hash: &str, pw: &str) -> bool {
+    match PasswordHash::new(hash) {
+        Ok(h) => Argon2::default().verify_password(pw.as_bytes(), &h).is_ok(),
+        Err(_) => false,
+    }
 }
 
 pub fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -27,13 +47,17 @@ impl FromRequestParts<Arc<App>> for Auth {
     async fn from_request_parts(parts: &mut Parts, state: &Arc<App>) -> Result<Self, Self::Rejection> {
         let tok = cookie(&parts.headers, "dk_session").ok_or_else(unauthorized)?;
         let conn = state.db.lock().unwrap();
+        // Akun yang dinonaktifkan langsung kehilangan sesinya.
         conn.query_row(
-            "SELECT role, nama FROM sessions WHERE token = ?1 AND expires_at > ?2",
+            "SELECT s.role, s.nama, COALESCE(u.username, '')
+               FROM sessions s LEFT JOIN users u ON u.id = s.user_id
+              WHERE s.token = ?1 AND s.expires_at > ?2 AND (s.user_id IS NULL OR u.aktif = 1)",
             params![tok, now()],
             |r| {
                 Ok(Auth {
                     role: r.get(0)?,
                     nama: r.get(1)?,
+                    username: r.get(2)?,
                 })
             },
         )
