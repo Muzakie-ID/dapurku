@@ -36,6 +36,9 @@ pub fn conflict(msg: &str) -> AppError {
 pub fn unauthorized() -> AppError {
     AppError(StatusCode::UNAUTHORIZED, "belum login".to_string())
 }
+pub fn too_many(msg: &str) -> AppError {
+    AppError(StatusCode::TOO_MANY_REQUESTS, msg.to_string())
+}
 pub fn forbidden() -> AppError {
     AppError(StatusCode::FORBIDDEN, "tidak punya akses".to_string())
 }

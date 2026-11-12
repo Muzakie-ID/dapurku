@@ -5,7 +5,7 @@ use crate::util::*;
 use crate::{sse, App};
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
     http::{header, HeaderMap},
     response::{IntoResponse, Response, Sse},
     Json,
@@ -15,6 +15,7 @@ use rusqlite::{params, Connection};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::Sha256;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 type S = Arc<App>;
@@ -305,8 +306,32 @@ fn hash_umpan() -> &'static str {
     H.get_or_init(|| crate::auth::hash_password("umpan"))
 }
 
-pub async fn login(State(s): State<S>, Json(b): Json<Login>) -> R<Response> {
+pub async fn login(
+    State(s): State<S>,
+    ConnectInfo(alamat): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(b): Json<Login>,
+) -> R<Response> {
     let uname = b.username.trim().to_lowercase();
+
+    // Batasi percobaan yang gagal. Per username supaya satu akun tidak bisa
+    // ditebak terus-menerus, dan per IP supaya satu penebak tidak bisa
+    // menyapu banyak username sekaligus.
+    let ip = crate::auth::ip_klien(s.cfg.trust_proxy, &headers, alamat);
+    let kunci_u = format!("u:{uname}");
+    let kunci_ip = format!("ip:{ip}");
+    for (kunci, batas) in [
+        (&kunci_u, crate::auth::BATAS_USER),
+        (&kunci_ip, crate::auth::BATAS_IP),
+    ] {
+        if let Some(sisa) = crate::auth::sisa_kunci(&s.login_gagal, kunci, batas) {
+            return Err(too_many(&format!(
+                "terlalu banyak percobaan login, coba lagi dalam {} menit",
+                (sisa + 59) / 60
+            )));
+        }
+    }
+
     let akun: Option<(i64, String, String, String)> = {
         let conn = s.db.lock().unwrap();
         conn.query_row(
@@ -321,14 +346,20 @@ pub async fn login(State(s): State<S>, Json(b): Json<Login>) -> R<Response> {
         Some(v) => v,
         None => {
             crate::auth::verify_password(hash_umpan(), &b.password);
+            crate::auth::catat_gagal(&s.login_gagal, &kunci_u);
+            crate::auth::catat_gagal(&s.login_gagal, &kunci_ip);
             tokio::time::sleep(std::time::Duration::from_millis(600)).await;
             return Err(salah());
         }
     };
     if !crate::auth::verify_password(&hash, &b.password) {
+        crate::auth::catat_gagal(&s.login_gagal, &kunci_u);
+        crate::auth::catat_gagal(&s.login_gagal, &kunci_ip);
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         return Err(salah());
     }
+    crate::auth::hapus_gagal(&s.login_gagal, &kunci_u);
+    crate::auth::hapus_gagal(&s.login_gagal, &kunci_ip);
     let token = format!("{}{}", rand_token(24), rand_token(24));
     let n = now();
     {

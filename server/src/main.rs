@@ -24,11 +24,13 @@ pub struct Config {
     pub webhook_secret: String,
     pub tz: i64, // menit di atas UTC, WIB = 420
     pub base_url: String,
+    pub trust_proxy: bool,
 }
 
 pub struct App {
     pub db: Mutex<Connection>,
     pub cfg: Config,
+    pub login_gagal: auth::LoginGagal,
 }
 
 fn env(k: &str, d: &str) -> String {
@@ -63,6 +65,7 @@ async fn main() {
         webhook_secret: env("WEBHOOK_SECRET", "dev-secret-ganti-di-produksi"),
         tz: env("TZ_OFFSET_MIN", "420").parse().unwrap_or(420),
         base_url: env("BASE_URL", ""),
+        trust_proxy: env("TRUST_PROXY", "0") == "1",
     };
     if cfg.webhook_secret.starts_with("dev-secret") {
         eprintln!("PERINGATAN: WEBHOOK_SECRET masih default. Ganti lewat env sebelum dipakai sungguhan.");
@@ -73,7 +76,11 @@ async fn main() {
 
     let conn = db::open(&db_path).unwrap_or_else(|e| panic!("gagal membuka database {db_path}: {e}"));
     let web_dir = cfg.web_dir.clone();
-    let state = Arc::new(App { db: Mutex::new(conn), cfg });
+    let state = Arc::new(App {
+        db: Mutex::new(conn),
+        cfg,
+        login_gagal: Default::default(),
+    });
 
     use api_public as p;
     use api_staff as s;
@@ -127,5 +134,8 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     eprintln!("Dapurku berjalan di http://localhost:{port}  (database: {db_path})");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("port sudah dipakai?");
-    axum::serve(listener, app).await.expect("server berhenti");
+    // with_connect_info supaya handler login tahu alamat klien untuk pembatasan percobaan.
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .await
+        .expect("server berhenti");
 }
