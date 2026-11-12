@@ -68,6 +68,29 @@ pub fn rupiah(n: i64) -> String {
     format!("{}Rp{}", if n < 0 { "-" } else { "" }, out)
 }
 
+/// Alasan kenapa PAYMENT_MODE=live belum boleh dijalankan, atau None kalau aman.
+/// Mode live memakai webhook pembayaran sungguhan, jadi kredensial bawaan di sana
+/// berarti siapa pun yang tahu nilai bawaannya bisa menandai pesanan lunas.
+pub fn alasan_tolak_live(webhook_secret: &str, akun_bawaan: &[String]) -> Option<String> {
+    let mut sebab: Vec<String> = Vec::new();
+    if webhook_secret.starts_with("dev-secret") {
+        sebab.push("WEBHOOK_SECRET masih memakai nilai bawaan".to_string());
+    } else if webhook_secret.chars().count() < 16 {
+        sebab.push("WEBHOOK_SECRET terlalu pendek (minimal 16 karakter)".to_string());
+    }
+    if !akun_bawaan.is_empty() {
+        sebab.push(format!(
+            "akun ini masih memakai password bawaan: {}",
+            akun_bawaan.join(", ")
+        ));
+    }
+    if sebab.is_empty() {
+        None
+    } else {
+        Some(sebab.join("; "))
+    }
+}
+
 pub fn setting_s(conn: &Connection, key: &str, def: &str) -> String {
     conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
         r.get::<_, String>(0)
@@ -126,6 +149,37 @@ mod tests {
         // satu detik sebelum tengah malam WIB masih hari yang sama
         assert_eq!(day_start(d0 + 86399, wib), d0);
         assert_eq!(day_start(d0 + 86400, wib), d0 + 86400);
+    }
+
+    #[test]
+    fn live_ditolak_kalau_webhook_secret_masih_bawaan() {
+        let a = alasan_tolak_live("dev-secret-ganti-di-produksi", &[]).unwrap();
+        assert!(a.contains("WEBHOOK_SECRET"), "{a}");
+    }
+
+    #[test]
+    fn live_ditolak_kalau_webhook_secret_terlalu_pendek() {
+        assert!(alasan_tolak_live("pendek", &[]).is_some());
+        assert!(alasan_tolak_live("123456789012345", &[]).is_some(), "15 karakter masih kurang");
+        assert!(alasan_tolak_live("1234567890123456", &[]).is_none(), "16 karakter sudah cukup");
+    }
+
+    #[test]
+    fn live_ditolak_kalau_masih_ada_password_bawaan() {
+        let secret = "rahasia-panjang-sekali";
+        let a = alasan_tolak_live(secret, &["admin".into(), "kasir".into()]).unwrap();
+        assert!(a.contains("admin") && a.contains("kasir"), "{a}");
+    }
+
+    #[test]
+    fn live_diizinkan_kalau_semuanya_sudah_diganti() {
+        assert_eq!(alasan_tolak_live("rahasia-panjang-sekali", &[]), None);
+    }
+
+    #[test]
+    fn dua_alasan_dilaporkan_sekaligus() {
+        let a = alasan_tolak_live("dev-secret-x", &["admin".into()]).unwrap();
+        assert!(a.contains("WEBHOOK_SECRET") && a.contains("admin"), "{a}");
     }
 
     #[test]

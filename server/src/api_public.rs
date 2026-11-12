@@ -176,13 +176,34 @@ pub async fn meja_qr(State(s): State<S>, headers: HeaderMap, Path(no): Path<Stri
             return Err(not_found("meja tidak ditemukan"));
         }
     }
-    let base = if !s.cfg.base_url.is_empty() {
-        s.cfg.base_url.clone()
+    let base = base_publik(&s.cfg, &headers);
+    qr_svg(&format!("{}/?meja={}", base, no))
+}
+
+/// Alamat publik aplikasi untuk ditanam di QR meja. BASE_URL dipakai kalau ada.
+/// Kalau tidak, alamat disusun dari header Host; skemanya diambil dari
+/// X-Forwarded-Proto bila proxy dipercaya, karena memaksa http:// membuat QR
+/// yang dicetak mengarah ke alamat tidak terenkripsi di pemasangan HTTPS.
+fn base_publik(cfg: &crate::Config, headers: &HeaderMap) -> String {
+    if !cfg.base_url.is_empty() {
+        return cfg.base_url.trim_end_matches('/').to_string();
+    }
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("localhost:8080");
+    let skema = if cfg.trust_proxy {
+        headers
+            .get("x-forwarded-proto")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(',').next())
+            .map(|v| v.trim())
+            .filter(|v| *v == "https" || *v == "http")
+            .unwrap_or("http")
     } else {
-        let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("localhost:8080");
-        format!("http://{host}")
+        "http"
     };
-    qr_svg(&format!("{}/?meja={}", base.trim_end_matches('/'), no))
+    format!("{skema}://{host}")
 }
 
 fn qr_svg(data: &str) -> R<Response> {
@@ -372,7 +393,7 @@ pub async fn login(
         )?;
         conn.execute("UPDATE users SET last_login = ?2 WHERE id = ?1", params![uid, n])?;
     }
-    let ck = format!("dk_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200");
+    let ck = crate::auth::cookie_sesi(&token, s.cfg.cookie_secure);
     Ok((
         [(header::SET_COOKIE, ck)],
         Json(json!({ "ok": true, "role": role, "nama": nama, "username": uname })),
@@ -385,10 +406,81 @@ pub async fn logout(State(s): State<S>, headers: HeaderMap) -> R<Response> {
         let conn = s.db.lock().unwrap();
         conn.execute("DELETE FROM sessions WHERE token = ?1", params![tok])?;
     }
-    let ck = "dk_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".to_string();
+    let ck = crate::auth::cookie_hapus(s.cfg.cookie_secure);
     Ok(([(header::SET_COOKIE, ck)], Json(json!({ "ok": true }))).into_response())
 }
 
 pub async fn me(auth: Auth) -> Json<Value> {
     Json(json!({ "role": auth.role, "nama": auth.nama, "username": auth.username }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(base_url: &str, trust_proxy: bool) -> crate::Config {
+        crate::Config {
+            web_dir: "../web".into(),
+            sim: true,
+            webhook_secret: "x".into(),
+            tz: 420,
+            base_url: base_url.into(),
+            trust_proxy,
+            cookie_secure: false,
+        }
+    }
+
+    fn headers(pasangan: &[(&str, &str)]) -> HeaderMap {
+        use axum::http::HeaderName;
+        let mut h = HeaderMap::new();
+        for (k, v) in pasangan {
+            h.insert(HeaderName::from_bytes(k.as_bytes()).unwrap(), v.parse().unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn base_url_dipakai_kalau_diset() {
+        let h = headers(&[("host", "localhost:8080")]);
+        assert_eq!(
+            base_publik(&cfg("https://dapurku.example.id", false), &h),
+            "https://dapurku.example.id"
+        );
+    }
+
+    #[test]
+    fn garis_miring_di_ujung_base_url_dibuang() {
+        let h = headers(&[]);
+        assert_eq!(
+            base_publik(&cfg("https://dapurku.example.id/", false), &h),
+            "https://dapurku.example.id"
+        );
+    }
+
+    #[test]
+    fn tanpa_base_url_memakai_host_dan_http() {
+        let h = headers(&[("host", "192.168.1.10:8080")]);
+        assert_eq!(base_publik(&cfg("", false), &h), "http://192.168.1.10:8080");
+    }
+
+    #[test]
+    fn skema_https_diambil_dari_proxy_yang_dipercaya() {
+        let h = headers(&[("host", "dapurku.example.id"), ("x-forwarded-proto", "https")]);
+        assert_eq!(base_publik(&cfg("", true), &h), "https://dapurku.example.id");
+        // rantai proxy: ambil yang pertama
+        let h2 = headers(&[("host", "dapurku.example.id"), ("x-forwarded-proto", "https, http")]);
+        assert_eq!(base_publik(&cfg("", true), &h2), "https://dapurku.example.id");
+    }
+
+    #[test]
+    fn header_proxy_diabaikan_kalau_proxy_tidak_dipercaya() {
+        let h = headers(&[("host", "dapurku.example.id"), ("x-forwarded-proto", "https")]);
+        assert_eq!(base_publik(&cfg("", false), &h), "http://dapurku.example.id");
+    }
+
+    #[test]
+    fn skema_aneh_dari_proxy_tidak_dipakai() {
+        let h = headers(&[("host", "dapurku.example.id"), ("x-forwarded-proto", "javascript")]);
+        assert_eq!(base_publik(&cfg("", true), &h), "http://dapurku.example.id");
+    }
 }

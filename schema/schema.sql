@@ -119,7 +119,10 @@ CREATE TABLE IF NOT EXISTS users (
   nama       TEXT    NOT NULL,
   aktif      INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
-  last_login INTEGER
+  last_login INTEGER,
+  -- 1 = password masih bawaan hasil seeding. Mode live menolak jalan selama
+  -- masih ada akun aktif bertanda ini.
+  pass_bawaan INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

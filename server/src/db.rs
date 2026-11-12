@@ -17,22 +17,57 @@ pub fn open(path: &str) -> rusqlite::Result<Connection> {
 /// schema.sql hanya membuat tabel yang belum ada, jadi database lama perlu
 /// penambahan kolom secara terpisah.
 fn migrasi(conn: &Connection) -> rusqlite::Result<()> {
-    let mut ada = false;
-    {
-        let mut stmt = conn.prepare("PRAGMA table_info(sessions)")?;
-        let mut rows = stmt.query([])?;
-        while let Some(r) = rows.next()? {
-            if r.get::<_, String>(1)? == "user_id" {
-                ada = true;
-            }
-        }
-    }
-    if !ada {
+    if !punya_kolom(conn, "sessions", "user_id")? {
         conn.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER REFERENCES users(id)", [])?;
         // sesi lama dibuat dengan PIN bersama; paksa login ulang dengan akun.
         conn.execute("DELETE FROM sessions", [])?;
     }
+    if !punya_kolom(conn, "users", "pass_bawaan")? {
+        conn.execute("ALTER TABLE users ADD COLUMN pass_bawaan INTEGER NOT NULL DEFAULT 0", [])?;
+        // Database dari versi sebelumnya sudah berisi akun hasil seeding tetapi
+        // belum punya penanda ini. Kalau dibiarkan 0, mode live akan lolos padahal
+        // passwordnya masih bawaan, jadi cocokkan langsung dengan hash tersimpan.
+        tandai_password_bawaan(conn)?;
+    }
     Ok(())
+}
+
+const PASSWORD_BAWAAN: [&str; 3] = ["admin123", "kasir123", "dapur123"];
+
+fn tandai_password_bawaan(conn: &Connection) -> rusqlite::Result<()> {
+    let akun: Vec<(i64, String)> = {
+        let mut stmt = conn.prepare("SELECT id, pass_hash FROM users")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (id, hash) in akun {
+        if PASSWORD_BAWAAN
+            .iter()
+            .any(|p| crate::auth::verify_password(&hash, p))
+        {
+            conn.execute("UPDATE users SET pass_bawaan = 1 WHERE id = ?1", params![id])?;
+        }
+    }
+    Ok(())
+}
+
+fn punya_kolom(conn: &Connection, tabel: &str, kolom: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({tabel})"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(r) = rows.next()? {
+        if r.get::<_, String>(1)? == kolom {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Username akun aktif yang passwordnya masih bawaan hasil seeding.
+pub fn akun_password_bawaan(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT username FROM users WHERE aktif = 1 AND pass_bawaan = 1 ORDER BY username")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    rows.collect()
 }
 
 fn seed_if_empty(conn: &Connection) -> rusqlite::Result<()> {
@@ -88,8 +123,10 @@ fn seed_if_empty(conn: &Connection) -> rusqlite::Result<()> {
                 pakai_bawaan = true;
             }
             conn.execute(
-                "INSERT INTO users(username, pass_hash, role, nama, created_at) VALUES (?1,?2,?3,?4,?5)",
-                params![u.trim().to_lowercase(), crate::auth::hash_password(&p), role, nama, now()],
+                "INSERT INTO users(username, pass_hash, role, nama, created_at, pass_bawaan)
+                 VALUES (?1,?2,?3,?4,?5,?6)",
+                params![u.trim().to_lowercase(), crate::auth::hash_password(&p), role, nama, now(),
+                        (p == def_p) as i64],
             )?;
         }
         if pakai_bawaan {
@@ -105,4 +142,61 @@ fn seed_if_empty(conn: &Connection) -> rusqlite::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(include_str!("../../schema/schema.sql")).unwrap();
+        c
+    }
+
+    fn tambah(c: &Connection, username: &str, role: &str, password: &str, aktif: i64) {
+        c.execute(
+            "INSERT INTO users(username, pass_hash, role, nama, created_at, aktif)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+            params![username, crate::auth::hash_password(password), role, username, aktif],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn migrasi_menandai_akun_yang_passwordnya_masih_bawaan() {
+        // database versi sebelumnya: akun sudah ada, penanda belum
+        let c = db();
+        tambah(&c, "admin", "admin", "admin123", 1);
+        tambah(&c, "dapur", "dapur", "dapur123", 1);
+        tambah(&c, "kasir", "kasir", "PasswordSendiri9", 1);
+        tandai_password_bawaan(&c).unwrap();
+        assert_eq!(
+            akun_password_bawaan(&c).unwrap(),
+            vec!["admin".to_string(), "dapur".to_string()],
+            "hanya yang masih bawaan yang ditandai"
+        );
+    }
+
+    #[test]
+    fn akun_nonaktif_tidak_menghalangi_mode_live() {
+        let c = db();
+        tambah(&c, "lama", "kasir", "kasir123", 0);
+        tambah(&c, "aktif", "admin", "PasswordSendiri9", 1);
+        tandai_password_bawaan(&c).unwrap();
+        assert!(
+            akun_password_bawaan(&c).unwrap().is_empty(),
+            "akun nonaktif tidak bisa dipakai login, jadi tidak perlu memblokir live"
+        );
+    }
+
+    #[test]
+    fn migrasi_boleh_dijalankan_berulang(){
+        let c = db();
+        tambah(&c, "admin", "admin", "admin123", 1);
+        migrasi(&c).unwrap();
+        migrasi(&c).unwrap();
+        assert!(punya_kolom(&c, "users", "pass_bawaan").unwrap());
+        assert!(punya_kolom(&c, "sessions", "user_id").unwrap());
+    }
 }

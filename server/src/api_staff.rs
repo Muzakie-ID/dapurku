@@ -691,13 +691,18 @@ pub async fn user_update(State(s): State<S>, auth: Auth, Path(id): Path<i64>, Js
     if let Some(p) = &b.password {
         cek_password(p)?;
         conn.execute(
-            "UPDATE users SET pass_hash = ?2 WHERE id = ?1",
+            "UPDATE users SET pass_hash = ?2, pass_bawaan = 0 WHERE id = ?1",
             params![id, crate::auth::hash_password(p)],
         )?;
     }
-    // Ganti password, ganti role, atau dinonaktifkan: sesi lama tidak boleh dipakai lagi.
+    // Ganti password, ganti role, atau dinonaktifkan: sesi lama tidak boleh dipakai
+    // lagi. Sesi yang sedang dipakai untuk permintaan ini dikecualikan, supaya admin
+    // yang mengganti password dirinya sendiri tidak langsung terlempar keluar.
     if b.password.is_some() || role_baru != role_kini || !aktif_baru {
-        conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![id])?;
+        conn.execute(
+            "DELETE FROM sessions WHERE user_id = ?1 AND token != ?2",
+            params![id, auth.token],
+        )?;
     }
     Ok(Json(json!({ "ok": true })))
 }

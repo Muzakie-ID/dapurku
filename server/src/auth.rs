@@ -12,6 +12,9 @@ pub struct Auth {
     pub role: String,
     pub nama: String,
     pub username: String,
+    /// Token sesi yang dipakai permintaan ini, supaya sesi lain bisa diputus
+    /// tanpa ikut memutus sesi yang sedang berjalan.
+    pub token: String,
 }
 
 /// Hash password dengan Argon2id. Hasilnya format PHC, salt sudah ikut di dalamnya.
@@ -98,6 +101,26 @@ pub fn ip_klien(trust_proxy: bool, headers: &HeaderMap, socket: SocketAddr) -> S
     socket.ip().to_string()
 }
 
+/// Cookie sesi. `secure` membuat browser hanya mengirimkannya lewat HTTPS;
+/// di HTTP biasa (pengembangan atau jaringan lokal) flag itu justru membuat
+/// cookie dibuang sehingga login tidak pernah menempel, karena itu ia ikut
+/// konfigurasi, bukan dinyalakan begitu saja.
+pub fn cookie_sesi(token: &str, secure: bool) -> String {
+    format!(
+        "dk_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200{}",
+        if secure { "; Secure" } else { "" }
+    )
+}
+
+/// Penghapus cookie sesi. Atributnya harus sama dengan saat dibuat, kalau tidak
+/// browser menganggapnya cookie lain dan yang lama tetap tertinggal.
+pub fn cookie_hapus(secure: bool) -> String {
+    format!(
+        "dk_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{}",
+        if secure { "; Secure" } else { "" }
+    )
+}
+
 pub fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     let raw = headers.get("cookie")?.to_str().ok()?;
     for part in raw.split(';') {
@@ -127,6 +150,7 @@ impl FromRequestParts<Arc<App>> for Auth {
                     role: r.get(0)?,
                     nama: r.get(1)?,
                     username: r.get(2)?,
+                    token: tok.clone(),
                 })
             },
         )
@@ -174,6 +198,34 @@ mod tests {
     fn hash_rusak_ditolak_bukan_panik() {
         assert!(!verify_password("bukan-hash", "apa pun"));
         assert!(!verify_password("", "apa pun"));
+    }
+
+    #[test]
+    fn cookie_sesi_tanpa_secure_di_http() {
+        let c = cookie_sesi("abc123", false);
+        assert!(c.starts_with("dk_session=abc123;"));
+        assert!(c.contains("HttpOnly") && c.contains("SameSite=Lax"));
+        assert!(!c.contains("Secure"), "di HTTP, Secure justru membuat cookie dibuang");
+    }
+
+    #[test]
+    fn cookie_sesi_pakai_secure_di_https() {
+        assert!(cookie_sesi("abc123", true).ends_with("; Secure"));
+    }
+
+    #[test]
+    fn cookie_hapus_atributnya_sama_dengan_saat_dibuat() {
+        for secure in [false, true] {
+            let buat = cookie_sesi("abc123", secure);
+            let hapus = cookie_hapus(secure);
+            assert!(hapus.contains("Max-Age=0"));
+            // atribut selain nilai dan Max-Age harus persis sama, kalau tidak
+            // browser menganggapnya cookie berbeda dan yang lama tertinggal
+            for atribut in ["Path=/", "HttpOnly", "SameSite=Lax"] {
+                assert!(buat.contains(atribut) && hapus.contains(atribut), "{atribut}");
+            }
+            assert_eq!(buat.contains("; Secure"), hapus.contains("; Secure"));
+        }
     }
 
     const T: i64 = 1_700_000_000;
