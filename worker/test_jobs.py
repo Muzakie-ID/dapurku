@@ -103,13 +103,50 @@ class TestRemindPayment(DasarTest):
         self.assertEqual(jobs.remind_payment(self.conn), 0)
         self.assertEqual(self.jumlah("SELECT COUNT(*) FROM notifications WHERE tipe='pengingat_bayar'"), 1)
 
-    def test_tunai_tidak_diingatkan(self):
-        self.pesanan(metode="tunai", expires_in=120)
-        self.assertEqual(jobs.remind_payment(self.conn), 0)
+    def test_tunai_ikut_diingatkan_dengan_kalimat_sendiri(self):
+        # pembeli tunai harus berjalan ke kasir, jadi justru dia yang perlu diingatkan
+        oid = self.pesanan(metode="tunai", expires_in=120)
+        self.assertEqual(jobs.remind_payment(self.conn), 1)
+        isi = self.jumlah("SELECT isi FROM notifications WHERE order_id=?", oid)
+        self.assertIn("kasir", isi)
+
+    def test_qris_memakai_kalimat_yang_berbeda(self):
+        oid = self.pesanan(metode="qris", expires_in=120)
+        jobs.remind_payment(self.conn)
+        isi = self.jumlah("SELECT isi FROM notifications WHERE order_id=?", oid)
+        self.assertNotIn("kasir", isi)
 
     def test_masih_lama_belum_diingatkan(self):
         self.pesanan(expires_in=900)
         self.assertEqual(jobs.remind_payment(self.conn), 0)
+
+
+class TestAntarAlerts(DasarTest):
+    def test_pesanan_siap_terlalu_lama_mengingatkan_kasir(self):
+        oid = self.pesanan(status="siap")
+        self.conn.execute("UPDATE orders SET ready_at=? WHERE id=?", (now() - 20 * 60, oid))
+        self.assertEqual(jobs.antar_alerts(self.conn), 1)
+        self.assertEqual(
+            self.jumlah("SELECT audience FROM notifications WHERE tipe='belum_diantar'"), "kasir"
+        )
+        # dedupe: putaran berikutnya tidak menghitung ulang
+        self.assertEqual(jobs.antar_alerts(self.conn), 0)
+
+    def test_baru_siap_sebentar_belum_diingatkan(self):
+        oid = self.pesanan(status="siap")
+        self.conn.execute("UPDATE orders SET ready_at=? WHERE id=?", (now() - 60, oid))
+        self.assertEqual(jobs.antar_alerts(self.conn), 0)
+
+    def test_pesanan_yang_belum_siap_tidak_ikut(self):
+        oid = self.pesanan(status="dimasak", paid_at=now() - 3600)
+        self.conn.execute("UPDATE orders SET ready_at=? WHERE id=?", (now() - 3600, oid))
+        self.assertEqual(jobs.antar_alerts(self.conn), 0)
+
+    def test_batas_mengikuti_pengaturan(self):
+        oid = self.pesanan(status="siap")
+        self.conn.execute("UPDATE orders SET ready_at=? WHERE id=?", (now() - 12 * 60, oid))
+        self.conn.execute("INSERT INTO settings(key,value) VALUES ('antar_menit','30')")
+        self.assertEqual(jobs.antar_alerts(self.conn), 0, "12 menit belum lewat batas 30 menit")
 
 
 class TestLateAlerts(DasarTest):

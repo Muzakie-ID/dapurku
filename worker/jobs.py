@@ -31,20 +31,29 @@ def expire_unpaid(conn):
 
 
 def remind_payment(conn, menit_sebelum=5):
-    """Ingatkan pembeli QRIS saat sisa waktu bayar tinggal beberapa menit."""
+    """Ingatkan pembeli saat sisa waktu bayar tinggal beberapa menit.
+
+    Berlaku untuk kedua metode. Pembeli tunai justru yang paling perlu diingatkan
+    karena harus berjalan ke kasir; sebelumnya hanya pesanan QRIS yang diingatkan
+    sehingga pesanan tunai hangus tanpa peringatan apa pun.
+    """
     t = now()
     rows = conn.execute(
-        """SELECT id, meja_no, expires_at FROM orders
-           WHERE status='menunggu_bayar' AND metode='qris'
+        """SELECT id, meja_no, metode, expires_at FROM orders
+           WHERE status='menunggu_bayar'
              AND expires_at - ? <= ? AND expires_at > ?""",
         (t, menit_sebelum * 60, t),
     ).fetchall()
     n = 0
     for r in rows:
         sisa = max(1, (r["expires_at"] - t + 59) // 60)
+        if r["metode"] == "tunai":
+            isi = (f"Pesanan #{kode(r['id'])} belum dibayar. Segera ke kasir, "
+                   f"sisa waktu sekitar {sisa} menit.")
+        else:
+            isi = f"Sisa waktu bayar pesanan #{kode(r['id'])} sekitar {sisa} menit lagi."
         n += push(conn, r["id"], "pembeli", "pengingat_bayar", "Segera selesaikan pembayaran",
-                  f"Sisa waktu bayar pesanan #{kode(r['id'])} sekitar {sisa} menit lagi.",
-                  f"{r['id']}:pengingat_bayar")
+                  isi, f"{r['id']}:pengingat_bayar")
     return n
 
 
@@ -66,6 +75,27 @@ def late_alerts(conn):
                  f"{r['id']}:pesanan_terlambat")
         if a or b:
             n += 1
+    return n
+
+
+def antar_alerts(conn):
+    """Pesanan yang sudah siap tapi lama belum diantar -> ingatkan kasir.
+
+    late_alerts berhenti di status 'dimasak', jadi pesanan yang sudah siap bisa
+    menunggu lama di counter tanpa ada yang diberi tahu.
+    """
+    batas = setting_int(conn, "antar_menit", 10) * 60
+    t = now()
+    rows = conn.execute(
+        "SELECT id, meja_no, ready_at FROM orders WHERE status='siap' AND ready_at IS NOT NULL AND ? - ready_at >= ?",
+        (t, batas),
+    ).fetchall()
+    n = 0
+    for r in rows:
+        mnt = (t - r["ready_at"]) // 60
+        n += push(conn, r["id"], "kasir", "belum_diantar", f"Belum diantar · Meja {r['meja_no']}",
+                  f"#{kode(r['id'])} sudah {mnt} menit menunggu di counter.",
+                  f"{r['id']}:belum_diantar")
     return n
 
 

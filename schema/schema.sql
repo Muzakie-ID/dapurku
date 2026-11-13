@@ -105,7 +105,10 @@ CREATE TABLE IF NOT EXISTS notifications (
   isi        TEXT    NOT NULL,
   dedupe_key TEXT    UNIQUE,
   ext_status TEXT    NOT NULL DEFAULT 'skip', -- skip | pending | sent | failed
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  -- 1 = staf sudah menangani. Dipakai untuk panggilan pelayan dan pesanan yang
+  -- belum diantar, supaya tidak hanya lewat sebagai notifikasi sesaat.
+  ditangani  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_notif_order ON notifications(order_id, id);
 CREATE INDEX IF NOT EXISTS idx_notif_aud   ON notifications(audience, id);

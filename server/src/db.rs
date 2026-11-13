@@ -22,6 +22,9 @@ fn migrasi(conn: &Connection) -> rusqlite::Result<()> {
         // sesi lama dibuat dengan PIN bersama; paksa login ulang dengan akun.
         conn.execute("DELETE FROM sessions", [])?;
     }
+    if !punya_kolom(conn, "notifications", "ditangani")? {
+        conn.execute("ALTER TABLE notifications ADD COLUMN ditangani INTEGER NOT NULL DEFAULT 0", [])?;
+    }
     if !punya_kolom(conn, "users", "pass_bawaan")? {
         conn.execute("ALTER TABLE users ADD COLUMN pass_bawaan INTEGER NOT NULL DEFAULT 0", [])?;
         // Database dari versi sebelumnya sudah berisi akun hasil seeding tetapi
@@ -78,6 +81,7 @@ fn seed_if_empty(conn: &Connection) -> rusqlite::Result<()> {
         ("tunai_menit", "30"),   // batas datang ke kasir untuk bayar tunai
         ("target_masak", "15"),  // target waktu masak (menit)
         ("telat_menit", "15"),   // lewat ini pesanan dianggap terlambat
+        ("antar_menit", "10"),   // lewat ini pesanan siap dianggap belum diantar
     ];
     for (k, v) in defaults {
         conn.execute(

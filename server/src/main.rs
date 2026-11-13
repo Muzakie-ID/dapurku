@@ -145,6 +145,8 @@ async fn main() {
         .route("/api/staff/orders/:id/konfirmasi-qris", post(s::konfirmasi_qris))
         .route("/api/staff/orders/:id/batal", post(s::batal))
         .route("/api/staff/meja/:no/kosongkan", post(s::kosongkan))
+        .route("/api/staff/panggilan", get(s::panggilan_list))
+        .route("/api/staff/panggilan/:id/selesai", post(s::panggilan_selesai))
         // admin
         .route("/api/admin/ringkasan", get(s::ringkasan))
         .route("/api/admin/orders", get(s::admin_orders))

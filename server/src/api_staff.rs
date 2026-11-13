@@ -264,6 +264,47 @@ pub async fn kosongkan(State(s): State<S>, auth: Auth, Path(no): Path<String>) -
     Ok(Json(json!({ "ok": true })))
 }
 
+// ---------- panggilan dan hal lain yang perlu ditangani kasir ----------
+
+/// Notifikasi kasir yang menuntut tindakan dan belum ditandai selesai.
+/// Tanpa daftar ini, panggilan pelayan hanya lewat sebagai toast sesaat dan
+/// hilang begitu kasir sedang melayani orang lain.
+pub async fn panggilan_list(State(s): State<S>, auth: Auth) -> R<Json<Value>> {
+    auth.need(&["kasir"])?;
+    let conn = s.db.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT n.id, n.tipe, n.judul, n.isi, n.created_at, o.meja_no
+           FROM notifications n LEFT JOIN orders o ON o.id = n.order_id
+          WHERE n.audience = 'kasir' AND n.ditangani = 0
+            AND n.tipe IN ('panggil_pelayan', 'belum_diantar')
+          ORDER BY n.id DESC LIMIT 20",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?, "tipe": r.get::<_, String>(1)?,
+                "judul": r.get::<_, String>(2)?, "isi": r.get::<_, String>(3)?,
+                "at": r.get::<_, i64>(4)?, "meja": r.get::<_, Option<String>>(5)?,
+            }))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Json(json!(rows)))
+}
+
+pub async fn panggilan_selesai(State(s): State<S>, auth: Auth, Path(id): Path<i64>) -> R<Json<Value>> {
+    auth.need(&["kasir"])?;
+    let conn = s.db.lock().unwrap();
+    let n = conn.execute(
+        "UPDATE notifications SET ditangani = 1
+          WHERE id = ?1 AND audience = 'kasir' AND ditangani = 0",
+        params![id],
+    )?;
+    if n == 0 {
+        return Err(not_found("panggilan tidak ditemukan atau sudah ditangani"));
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
 // ---------- admin ----------
 
 fn ymd(t: i64, tz_min: i64) -> String {
@@ -707,13 +748,14 @@ pub async fn user_update(State(s): State<S>, auth: Auth, Path(id): Path<i64>, Js
     Ok(Json(json!({ "ok": true })))
 }
 
-const SETTING_KEYS: [(&str, bool); 6] = [
+const SETTING_KEYS: [(&str, bool); 7] = [
     ("nama_resto", false),
     ("merchant_nmid", false),
     ("bayar_menit", true),
     ("tunai_menit", true),
     ("target_masak", true),
     ("telat_menit", true),
+    ("antar_menit", true),
 ];
 
 pub async fn settings_get(State(s): State<S>, auth: Auth) -> R<Json<Value>> {

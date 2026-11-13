@@ -100,6 +100,7 @@
         <div><label class="lbl" for="s_tunai_menit">Batas waktu bayar tunai (menit)</label><input class="field" id="s_tunai_menit" inputmode="numeric"></div>
         <div><label class="lbl" for="s_target_masak">Target waktu masak (menit)</label><input class="field" id="s_target_masak" inputmode="numeric"></div>
         <div><label class="lbl" for="s_telat_menit">Dianggap terlambat setelah (menit)</label><input class="field" id="s_telat_menit" inputmode="numeric"></div>
+        <div><label class="lbl" for="s_antar_menit">Pesanan siap dianggap belum diantar setelah (menit)</label><input class="field" id="s_antar_menit" inputmode="numeric"></div>
         <div class="err" id="setErr" role="alert"></div>
         <button class="btn" type="submit">Simpan pengaturan</button>
       </form>
@@ -250,7 +251,7 @@
       }).join('');
     }).catch(authErr);
   }
-  var KEYS = ['nama_resto', 'merchant_nmid', 'bayar_menit', 'tunai_menit', 'target_masak', 'telat_menit'];
+  var KEYS = ['nama_resto', 'merchant_nmid', 'bayar_menit', 'tunai_menit', 'target_masak', 'telat_menit', 'antar_menit'];
   function loadSet() { DK.api('/api/admin/settings').then(function (s) { KEYS.forEach(function (k) { $('s_' + k).value = s[k]; }); }).catch(authErr); }
   $('setForm').addEventListener('submit', function (e) {
     e.preventDefault(); var b = {}; KEYS.forEach(function (k) { b[k] = $('s_' + k).value; });
